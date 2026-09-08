@@ -1,0 +1,2 @@
+/*
+  Content-Security-Policy: default-src 'none'; script-src 'self' https://p.trellocdn.com 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https:; connect-src https://api.trello.com https://trello.com; frame-ancestors https://trello.com https://*.trello.com; object-src 'none'; base-uri 'none'

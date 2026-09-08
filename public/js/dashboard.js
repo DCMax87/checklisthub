@@ -1,0 +1,3368 @@
+(function () {
+  var config = window.CHECKLIST_HUB_CONFIG;
+  var api = window.ChecklistHubApi;
+  var prefsApi = window.ChecklistHubPrefs;
+  var cookies = window.ChecklistHubCookies;
+  var params = new URLSearchParams(window.location.search);
+  var isDemo =
+    params.get("demo") === "1" ||
+    params.get("demo") === "true" ||
+    config.forceDemo === true;
+
+  cookies.purgeLegacyBrowserStorage();
+
+  var els = {
+    subtitle: document.getElementById("subtitle"),
+    refreshBtn: document.getElementById("refresh-btn"),
+    statusBtn: document.getElementById("status-btn"),
+    syncActions: document.getElementById("sync-actions"),
+    syncMenuBtn: document.getElementById("sync-menu-btn"),
+    syncMenu: document.getElementById("sync-menu"),
+    syncScanBtn: document.getElementById("sync-scan-btn"),
+    authBtn: document.getElementById("auth-btn"),
+    workspace: document.getElementById("workspace"),
+    configPanel: document.getElementById("config-panel"),
+    configToggle: document.getElementById("config-toggle"),
+    configClose: document.getElementById("config-close"),
+    filterSummary: document.getElementById("filter-summary"),
+    prefsBar: document.getElementById("config-panel"),
+    filterWorkType: document.getElementById("filter-work-type"),
+    allowlistBoards: document.getElementById("allowlist-boards"),
+    savedViews: document.getElementById("saved-views"),
+    saveViewBtn: document.getElementById("save-view-btn"),
+    renameViewBtn: document.getElementById("rename-view-btn"),
+    deleteViewBtn: document.getElementById("delete-view-btn"),
+    savedViewName: document.getElementById("saved-view-name"),
+    filters: document.getElementById("config-panel"),
+    metaRow: document.getElementById("meta-row"),
+    resultCount: document.getElementById("result-count"),
+    cacheNote: document.getElementById("cache-note"),
+    banner: document.getElementById("banner"),
+    bannerText: document.getElementById("banner-text"),
+    bannerDismiss: document.getElementById("banner-dismiss"),
+    bannerDetails: document.getElementById("banner-details"),
+    bannerTechnical: document.getElementById("banner-technical"),
+    bannerCopy: document.getElementById("banner-copy"),
+    stageBar: document.getElementById("stage-bar"),
+    emptyState: document.getElementById("empty-state"),
+    tableWrap: document.getElementById("table-wrap"),
+    itemsBody: document.getElementById("items-body"),
+    filterAssignee: document.getElementById("filter-assignee"),
+    filterStatus: document.getElementById("filter-status"),
+    filterDue: document.getElementById("filter-due"),
+    filterBoard: document.getElementById("filter-board"),
+    filterLabel: document.getElementById("filter-label"),
+    filterList: document.getElementById("filter-list"),
+    filterSearch: document.getElementById("filter-search"),
+    filterGroup: document.getElementById("filter-group"),
+    filterGroupPageSize: document.getElementById("filter-group-page-size"),
+    groupPageSizeField: document.getElementById("group-page-size-field"),
+    focusChips: document.getElementById("focus-chips"),
+    exportBtn: document.getElementById("export-btn"),
+    viewToggle: document.getElementById("view-toggle"),
+    densityToggle: document.getElementById("density-toggle"),
+    welcomeModal: document.getElementById("welcome-modal"),
+    welcomeDismiss: document.getElementById("welcome-dismiss"),
+    welcomeScan: document.getElementById("welcome-scan"),
+    welcomeHelpBtn: document.getElementById("welcome-help-btn"),
+    scanNudge: document.getElementById("scan-nudge"),
+    statusRefreshBanner: document.getElementById("status-refresh-banner"),
+    statusRefreshBtn: document.getElementById("status-refresh-btn"),
+    statusRefreshDismiss: document.getElementById("status-refresh-dismiss"),
+    scanProgress: document.getElementById("scan-progress"),
+    scanProgressFill: document.getElementById("scan-progress-fill"),
+    scanProgressText: document.getElementById("scan-progress-text"),
+    scanCancelBtn: document.getElementById("scan-cancel-btn"),
+    scanConfirmModal: document.getElementById("scan-confirm-modal"),
+    scanConfirmOk: document.getElementById("scan-confirm-ok"),
+    scanConfirmCancel: document.getElementById("scan-confirm-cancel"),
+    defaultViewBtn: document.getElementById("default-view-btn"),
+    privacyModal: document.getElementById("privacy-modal"),
+    privacyOpenBtn: document.getElementById("privacy-open-btn"),
+    privacyModalClose: document.getElementById("privacy-modal-close"),
+    groupField: document.getElementById("group-field"),
+    calendarWrap: document.getElementById("calendar-wrap"),
+    calendarGrid: document.getElementById("calendar-grid"),
+    calendarTitle: document.getElementById("cal-title"),
+    calendarUndated: document.getElementById("calendar-undated"),
+    calendarUndatedText: document.getElementById("calendar-undated-text"),
+    calendarUndatedBtn: document.getElementById("calendar-undated-btn"),
+    calPrev: document.getElementById("cal-prev"),
+    calNext: document.getElementById("cal-next"),
+    calToday: document.getElementById("cal-today"),
+    assigneeSearch: document.getElementById("assignee-search"),
+  };
+
+  var prefs = prefsApi.loadPrefs();
+
+  var state = {
+    token: null,
+    data: null,
+    sortKey: prefs.sortKey || "due",
+    sortDir: prefs.sortDir || "asc",
+    groupBy: prefs.groupBy || "due",
+    view: prefs.view || "list",
+    workType: prefs.workType || "both",
+    density: prefs.density === "compact" ? "compact" : "comfortable",
+    groupPageSize:
+      prefs.groupPageSize === 0
+        ? 0
+        : prefs.groupPageSize === 10 ||
+            prefs.groupPageSize === 50 ||
+            prefs.groupPageSize === 100
+          ? prefs.groupPageSize
+          : 20,
+    groupVisibleCounts: {},
+    calendarMonth: startOfMonth(new Date()),
+    expandedCalDay: null,
+    focusCalDayAfterRender: null,
+    collapsedGroups: prefs.collapsedGroups || {},
+    loading: false,
+    statusTimer: null,
+    statusNudgeDismissedUntil: 0,
+    filtersOpen: Boolean(prefs.filtersOpen),
+    searchTimer: null,
+    scanAbort: null,
+    demoTimer: null,
+    applyDefaultViewPending: false,
+    modalFocusBefore: null,
+    demo: isDemo,
+  };
+
+  if (els.filterGroup) {
+    els.filterGroup.value = state.groupBy;
+  }
+  if (els.filterGroupPageSize) {
+    els.filterGroupPageSize.value = String(state.groupPageSize);
+  }
+  if (els.filterWorkType) {
+    els.filterWorkType.value = state.workType;
+  }
+
+  function startOfMonth(date) {
+    return new Date(date.getFullYear(), date.getMonth(), 1);
+  }
+
+  function dateKey(date) {
+    var y = date.getFullYear();
+    var m = String(date.getMonth() + 1);
+    if (m.length < 2) m = "0" + m;
+    var d = String(date.getDate());
+    if (d.length < 2) d = "0" + d;
+    return y + "-" + m + "-" + d;
+  }
+
+  function savePrefs(patch) {
+    var next = prefsApi.savePrefs(patch);
+    if (patch.sortKey != null) state.sortKey = next.sortKey;
+    if (patch.sortDir != null) state.sortDir = next.sortDir;
+    if (patch.groupBy != null) state.groupBy = next.groupBy;
+    if (patch.view != null) state.view = next.view;
+    if (patch.workType != null) state.workType = next.workType;
+    if (patch.density != null) state.density = next.density;
+    if (patch.groupPageSize != null) state.groupPageSize = next.groupPageSize;
+    if (patch.collapsedGroups != null) {
+      state.collapsedGroups = next.collapsedGroups;
+    }
+    return next;
+  }
+
+  function resetGroupVisibleCounts() {
+    state.groupVisibleCounts = {};
+  }
+
+  function visibleCountForGroup(groupId, total) {
+    var pageSize = state.groupPageSize;
+    if (!pageSize) return total;
+    var shown = state.groupVisibleCounts[groupId];
+    if (shown == null || shown < pageSize) shown = pageSize;
+    return Math.min(total, shown);
+  }
+
+  function applyDensity(density) {
+    state.density = density === "compact" ? "compact" : "comfortable";
+    document.body.classList.toggle("density-compact", state.density === "compact");
+    if (els.densityToggle) {
+      els.densityToggle.querySelectorAll("[data-density]").forEach(function (btn) {
+        var active = btn.getAttribute("data-density") === state.density;
+        btn.classList.toggle("is-active", active);
+        btn.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+    }
+  }
+
+  applyDensity(state.density);
+
+  function createDemoTrelloClient() {
+    return {
+      render: function (cb) {
+        if (typeof cb === "function") cb();
+      },
+      sizeTo: function () {},
+      getRestApi: function () {
+        return Promise.resolve({
+          isAuthorized: function () {
+            return Promise.resolve(true);
+          },
+          getToken: function () {
+            return Promise.resolve("demo-token");
+          },
+          authorize: function () {
+            return Promise.resolve("demo-token");
+          },
+        });
+      },
+    };
+  }
+
+  var t =
+    isDemo || !window.TrelloPowerUp
+      ? createDemoTrelloClient()
+      : window.TrelloPowerUp.iframe({
+          appKey: config.appKey,
+          appName: config.appName,
+          appAuthor: config.appAuthor,
+        });
+
+  if (isDemo) {
+    document.body.classList.add("is-demo");
+  }
+
+  function showBanner(message, kind, options) {
+    var opts = options || {};
+    if (!message) {
+      els.banner.hidden = true;
+      if (els.bannerText) els.bannerText.textContent = "";
+      else els.banner.textContent = "";
+      if (els.bannerDismiss) els.bannerDismiss.hidden = true;
+      if (els.bannerDetails) {
+        els.bannerDetails.hidden = true;
+        els.bannerDetails.open = false;
+      }
+      if (els.bannerTechnical) els.bannerTechnical.textContent = "";
+      if (els.banner) els.banner.removeAttribute("data-banner-kind");
+      return;
+    }
+    els.banner.hidden = false;
+    els.banner.className = "banner" + (kind ? " banner-" + kind : "");
+    els.banner.setAttribute("data-banner-kind", opts.bannerKind || kind || "info");
+    if (kind === "error") {
+      els.banner.setAttribute("role", "alert");
+      els.banner.setAttribute("aria-live", "assertive");
+    } else {
+      els.banner.setAttribute("role", "status");
+      els.banner.setAttribute("aria-live", "polite");
+    }
+    if (els.bannerText) {
+      els.bannerText.textContent = message;
+    } else {
+      els.banner.textContent = message;
+    }
+    if (els.bannerDismiss) {
+      els.bannerDismiss.hidden = !opts.dismissible;
+    }
+    if (els.bannerDetails && els.bannerTechnical) {
+      if (opts.technical) {
+        els.bannerDetails.hidden = false;
+        els.bannerTechnical.textContent = opts.technical;
+      } else {
+        els.bannerDetails.hidden = true;
+        els.bannerDetails.open = false;
+        els.bannerTechnical.textContent = "";
+      }
+    }
+  }
+
+  function describeError(err, context) {
+    var raw = (err && err.message) || String(err || "Unknown error");
+    var technical =
+      (err && err.technical) ||
+      raw +
+        (err && err.stack ? "\n\n" + String(err.stack).split("\n").slice(0, 6).join("\n") : "");
+    var friendly = raw;
+    var status = err && err.status;
+
+    if (err && err.name === "TrelloApiError" && err.message) {
+      friendly = err.message;
+    } else if (err && err.name === "TrelloRateLimitError") {
+      friendly = err.message;
+    } else if (err && err.name === "TrelloNetworkError") {
+      friendly = err.message;
+    } else if (/YOUR_TRELLO_API_KEY/.test(raw) || /config\.js/.test(raw)) {
+      friendly =
+        "Checklist Hub is not configured yet. An admin needs to set the Power-Up API key.";
+      technical = raw;
+    } else if (/Trello API (\d+)/.test(raw)) {
+      var statusMatch = raw.match(/Trello API (\d+)/);
+      status = statusMatch ? Number(statusMatch[1]) : status;
+      friendly =
+        status === 401 || status === 403
+          ? "Trello refused access. Try authorizing again."
+          : status === 429
+            ? "Trello is rate-limiting requests. Wait a minute and try again."
+            : "Something went wrong talking to Trello. Try again, or share the technical details with an admin.";
+      technical = raw;
+    } else if (/Failed to fetch|NetworkError|Load failed/i.test(raw)) {
+      friendly =
+        "Could not reach Trello. Check your network connection and try again.";
+      technical = raw;
+    }
+
+    var stamp = new Date().toISOString();
+    var report =
+      "Checklist Hub error report\n" +
+      "When: " +
+      stamp +
+      "\n" +
+      "Context: " +
+      (context || "general") +
+      "\n" +
+      "User message: " +
+      friendly +
+      "\n" +
+      (status ? "HTTP status: " + status + "\n" : "") +
+      "Details:\n" +
+      technical;
+
+    return {
+      friendly: friendly,
+      technical: report,
+    };
+  }
+
+  function showErrorBanner(err, context) {
+    var info = describeError(err, context);
+    showBanner(info.friendly, "error", {
+      technical: info.technical,
+      dismissible: true,
+    });
+  }
+
+  function clearNonPrivacyBanner() {
+    if (
+      els.bannerDismiss &&
+      !els.bannerDismiss.hidden &&
+      !els.banner.hidden &&
+      els.banner.className.indexOf("banner-error") === -1
+    ) {
+      return;
+    }
+    showBanner(null);
+  }
+
+  function showPrivacyBannerIfNeeded() {
+    var current = prefsApi.loadPrefs();
+    if (current.privacyBannerDismissed) return;
+    if (!els.banner.hidden && els.bannerDismiss && !els.bannerDismiss.hidden) {
+      return;
+    }
+    if (!els.banner.hidden && els.banner.className.indexOf("banner-error") >= 0) {
+      return;
+    }
+    showBanner(
+      "Preferences are saved in cookies only. Trello data stays in memory while this tab is open.",
+      "info",
+      { dismissible: true, bannerKind: "privacy" }
+    );
+  }
+
+  showPrivacyBannerIfNeeded();
+
+  function startOfDay(date) {
+    var d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  function endOfDay(date) {
+    var d = new Date(date);
+    d.setHours(23, 59, 59, 999);
+    return d;
+  }
+
+  function formatDue(due) {
+    if (!due) return "—";
+    var date = new Date(due);
+    if (isNaN(date.getTime())) return "—";
+    return date.toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+
+  function dueClass(due, stateValue) {
+    if (!due || stateValue === "complete") return "";
+    var now = Date.now();
+    var ts = new Date(due).getTime();
+    if (ts < now) return "due-overdue";
+    if (ts <= endOfDay(new Date()).getTime()) return "due-today";
+    return "";
+  }
+
+  function itemState(item) {
+    if (item.kind === "card") {
+      if (item.dueComplete) return "complete";
+      return item.state || "incomplete";
+    }
+    return item.state;
+  }
+
+  function getCheckedValues(root) {
+    return Array.prototype.slice
+      .call(root.querySelectorAll('input[type="checkbox"]:checked'))
+      .map(function (input) {
+        return input.value;
+      });
+  }
+
+  function setCheckedValues(root, values) {
+    var set = {};
+    (values || []).forEach(function (v) {
+      set[v] = true;
+    });
+    root.querySelectorAll('input[type="checkbox"]').forEach(function (input) {
+      input.checked = Boolean(set[input.value]);
+    });
+  }
+
+  function updateMultiSummary(root, emptyLabel, allLabel) {
+    var summary = root.querySelector(".multi-select-summary");
+    var checked = getCheckedValues(root);
+    var total = root.querySelectorAll('input[type="checkbox"]').length;
+    if (!checked.length) {
+      summary.textContent = emptyLabel;
+      return;
+    }
+    if (allLabel && checked.length === total) {
+      summary.textContent = allLabel;
+      return;
+    }
+    if (checked.length === 1) {
+      var only = null;
+      var boxes = root.querySelectorAll('input[type="checkbox"]');
+      for (var i = 0; i < boxes.length; i += 1) {
+        if (boxes[i].value === checked[0]) {
+          only = boxes[i];
+          break;
+        }
+      }
+      summary.textContent =
+        (only && only.getAttribute("data-label")) || checked[0];
+      return;
+    }
+    summary.textContent = checked.length + " selected";
+  }
+
+  function updateAssigneeSummary() {
+    updateMultiSummary(els.filterAssignee, "Anyone", "Anyone");
+  }
+
+  function filterAssigneeOptions(query) {
+    if (!els.filterAssignee) return;
+    var q = String(query || "").trim().toLowerCase();
+    els.filterAssignee.querySelectorAll(".multi-option").forEach(function (row) {
+      var label = (
+        (row.querySelector("input") &&
+          row.querySelector("input").getAttribute("data-label")) ||
+        row.textContent ||
+        ""
+      ).toLowerCase();
+      row.hidden = Boolean(q) && label.indexOf(q) === -1;
+    });
+  }
+
+  function updateAllowlistSummary() {
+    if (!els.allowlistBoards) return;
+    var summary = els.allowlistBoards.querySelector(".multi-select-summary");
+    if (!summary) return;
+    var optionCount = els.allowlistBoards.querySelectorAll(
+      'input[type="checkbox"]'
+    ).length;
+    if (!optionCount) {
+      var saved = prefsApi.loadPrefs().allowlist || [];
+      if (saved.length) {
+        summary.textContent =
+          saved.length +
+          " saved board" +
+          (saved.length === 1 ? "" : "s") +
+          " (names after scan)";
+        return;
+      }
+      summary.textContent = "All accessible boards";
+      return;
+    }
+    var checked = getCheckedValues(els.allowlistBoards);
+    if (!checked.length) {
+      summary.textContent = "All accessible boards";
+      return;
+    }
+    summary.textContent =
+      checked.length + " board" + (checked.length === 1 ? "" : "s");
+  }
+
+  function addOption(container, value, label, checked) {
+    var row = document.createElement("label");
+    row.className = "multi-option";
+    var input = document.createElement("input");
+    input.type = "checkbox";
+    input.value = value;
+    input.checked = Boolean(checked);
+    input.setAttribute("data-label", label);
+    var text = document.createElement("span");
+    text.textContent = label;
+    row.appendChild(input);
+    row.appendChild(text);
+    container.appendChild(row);
+  }
+
+  function getAllowlistBoardIds() {
+    if (els.allowlistBoards) {
+      var optionCount = els.allowlistBoards.querySelectorAll(
+        'input[type="checkbox"]'
+      ).length;
+      if (optionCount) {
+        var checked = getCheckedValues(els.allowlistBoards);
+        return checked.length ? checked : null;
+      }
+    }
+    var saved = prefsApi.loadPrefs().allowlist || [];
+    return saved.length ? saved : null;
+  }
+
+  function persistAllowlist() {
+    var ids = getCheckedValues(els.allowlistBoards);
+    savePrefs({ allowlist: ids });
+    updateAllowlistSummary();
+  }
+
+  function populateAllowlistBoards(boards) {
+    if (!els.allowlistBoards) return;
+    var container = document.getElementById("allowlist-board-options");
+    if (!container) return;
+    var allowlist = prefsApi.loadPrefs().allowlist || [];
+    container.innerHTML = "";
+    boards
+      .slice()
+      .sort(function (a, b) {
+        return a.name.localeCompare(b.name);
+      })
+      .forEach(function (board) {
+        var checked = allowlist.indexOf(board.id) >= 0;
+        addOption(container, board.id, board.name, checked);
+      });
+    updateAllowlistSummary();
+  }
+
+  function populateBoards(boards) {
+    var container = document.getElementById("filter-board-options");
+    var previous = getCheckedValues(els.filterBoard);
+    var hadOptions =
+      els.filterBoard.querySelectorAll('input[type="checkbox"]').length > 0;
+    container.innerHTML = "";
+    boards
+      .slice()
+      .sort(function (a, b) {
+        return a.name.localeCompare(b.name);
+      })
+      .forEach(function (board) {
+        var checked = !hadOptions || previous.indexOf(board.id) >= 0;
+        addOption(container, board.id, board.name, checked);
+      });
+    updateMultiSummary(els.filterBoard, "All boards", "All boards");
+  }
+
+  function populateLabels(labels) {
+    if (!els.filterLabel) return;
+    var container = document.getElementById("filter-label-options");
+    if (!container) return;
+    var previous = getCheckedValues(els.filterLabel);
+    var hadOptions = container.querySelectorAll('input[type="checkbox"]').length > 0;
+    container.innerHTML = "";
+    (labels || []).forEach(function (label) {
+      var checked = hadOptions && previous.indexOf(label.id) >= 0;
+      addOption(container, label.id, label.name || "Label", checked);
+    });
+    updateMultiSummary(els.filterLabel, "All labels", "All labels");
+  }
+
+  function populateLists(lists) {
+    if (!els.filterList) return;
+    var container = document.getElementById("filter-list-options");
+    if (!container) return;
+    var previous = getCheckedValues(els.filterList);
+    var hadOptions = container.querySelectorAll('input[type="checkbox"]').length > 0;
+    container.innerHTML = "";
+    (lists || []).forEach(function (list) {
+      var label =
+        (list.boardName ? list.boardName + " · " : "") + (list.name || "List");
+      var checked = hadOptions && previous.indexOf(list.id) >= 0;
+      addOption(container, list.id, label, checked);
+    });
+    updateMultiSummary(els.filterList, "All lists", "All lists");
+  }
+
+  function populateAssignees(members, me) {
+    var container = document.getElementById("filter-assignee-options");
+    var previous = getCheckedValues(els.filterAssignee);
+    var hadOptions =
+      els.filterAssignee.querySelectorAll('input[type="checkbox"]').length > 0;
+    container.innerHTML = "";
+
+    var meId = me && me.id;
+    var meLabel = "Me (" + ((me && me.fullName) || "you") + ")";
+    addOption(
+      container,
+      "me",
+      meLabel,
+      !hadOptions ? true : previous.indexOf("me") >= 0
+    );
+    addOption(
+      container,
+      "unassigned",
+      "Unassigned",
+      hadOptions && previous.indexOf("unassigned") >= 0
+    );
+
+    members
+      .slice()
+      .sort(function (a, b) {
+        return (a.fullName || "").localeCompare(b.fullName || "");
+      })
+      .forEach(function (member) {
+        if (!member || !member.id || (meId && member.id === meId)) return;
+        var label = member.fullName || member.username || member.id;
+        addOption(
+          container,
+          member.id,
+          label,
+          hadOptions && previous.indexOf(member.id) >= 0
+        );
+      });
+
+    updateAssigneeSummary();
+  }
+
+  function collectRows() {
+    if (!state.data) return [];
+    var items = state.data.items || [];
+    var memberCards = state.data.memberCards || [];
+    var workType = state.workType;
+    if (workType === "checkitem") return items.slice();
+    if (workType === "card") return memberCards.slice();
+    return items.concat(memberCards);
+  }
+
+  function matchesFilters(item) {
+    var meId = state.data && state.data.me && state.data.me.id;
+    var assignees = getCheckedValues(els.filterAssignee);
+    var boards = getCheckedValues(els.filterBoard);
+    var status = els.filterStatus.value;
+    var due = els.filterDue.value;
+    var q = (els.filterSearch.value || "").trim().toLowerCase();
+    var rowState = itemState(item);
+
+    if (assignees.length) {
+      var wantsUnassigned = assignees.indexOf("unassigned") >= 0;
+      var wantsMe = assignees.indexOf("me") >= 0;
+      var memberIds = assignees.filter(function (v) {
+        return v !== "me" && v !== "unassigned";
+      });
+      var ok = false;
+      if (wantsUnassigned && !item.idMember) ok = true;
+      if (wantsMe && meId && item.idMember === meId) ok = true;
+      if (item.idMember && memberIds.indexOf(item.idMember) >= 0) ok = true;
+      if (!ok) return false;
+    }
+
+    if (status === "incomplete" && rowState !== "incomplete") return false;
+    if (status === "complete" && rowState !== "complete") return false;
+
+    if (boards.length && boards.indexOf(item.boardId) === -1) return false;
+
+    var labels = els.filterLabel ? getCheckedValues(els.filterLabel) : [];
+    if (labels.length) {
+      var itemLabelIds = (item.labels || []).map(function (l) {
+        return l.id;
+      });
+      var labelHit = labels.some(function (id) {
+        return itemLabelIds.indexOf(id) >= 0;
+      });
+      if (!labelHit) return false;
+    }
+
+    var lists = els.filterList ? getCheckedValues(els.filterList) : [];
+    if (lists.length && lists.indexOf(item.listId) === -1) return false;
+
+    // Calendar already lays work out by date; due chips/select would only hollow days.
+    if (due !== "all" && state.view !== "calendar") {
+      var dueTs = item.due ? new Date(item.due).getTime() : null;
+      var now = new Date();
+      if (due === "none" && dueTs) return false;
+      if (due === "myday") {
+        if (!dueTs || rowState === "complete") return false;
+        var dayStart = startOfDay(now).getTime();
+        var dayEnd = endOfDay(now).getTime();
+        var isOverdue = dueTs < now.getTime();
+        var isToday = dueTs >= dayStart && dueTs <= dayEnd;
+        if (!isOverdue && !isToday) return false;
+      }
+      if (due === "overdue") {
+        if (!dueTs || rowState === "complete" || dueTs >= now.getTime()) {
+          return false;
+        }
+      }
+      if (due === "today") {
+        if (
+          !dueTs ||
+          dueTs < startOfDay(now).getTime() ||
+          dueTs > endOfDay(now).getTime()
+        ) {
+          return false;
+        }
+      }
+      if (due === "week") {
+        // Match dueBucket("week"): after end of today through end of day +7.
+        var todayEnd = endOfDay(now).getTime();
+        var weekEnd = endOfDay(
+          new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
+        ).getTime();
+        if (
+          !dueTs ||
+          rowState === "complete" ||
+          dueTs <= todayEnd ||
+          dueTs > weekEnd
+        ) {
+          return false;
+        }
+      }
+    }
+
+    if (q) {
+      var labelNames = (item.labels || [])
+        .map(function (l) {
+          return l.name;
+        })
+        .join(" ");
+      var hay = [
+        item.name,
+        item.cardName,
+        item.boardName,
+        item.checklistName,
+        item.assigneeName,
+        item.listName,
+        labelNames,
+        item.kind === "card" ? "card member" : "checklist task",
+      ]
+        .join(" ")
+        .toLowerCase();
+      if (hay.indexOf(q) === -1) return false;
+    }
+
+    return true;
+  }
+
+  function closeAllMultiSelects(except) {
+    document.querySelectorAll(".multi-select.is-open").forEach(function (root) {
+      if (except && root === except) return;
+      root.classList.remove("is-open");
+      var panel = root.querySelector(".multi-select-panel");
+      var toggle = root.querySelector(".multi-select-toggle");
+      if (panel) panel.hidden = true;
+      if (toggle) toggle.setAttribute("aria-expanded", "false");
+    });
+  }
+
+  function wireMultiSelect(root, options) {
+    if (!root) return;
+    var opts = options || {};
+    var toggle = root.querySelector(".multi-select-toggle");
+    var panel = root.querySelector(".multi-select-panel");
+
+    toggle.addEventListener("click", function (event) {
+      event.stopPropagation();
+      var willOpen = panel.hidden;
+      closeAllMultiSelects();
+      if (willOpen) {
+        panel.hidden = false;
+        root.classList.add("is-open");
+        toggle.setAttribute("aria-expanded", "true");
+        var search = panel.querySelector(".multi-select-search");
+        if (search) {
+          search.value = "";
+          filterAssigneeOptions("");
+          setTimeout(function () {
+            search.focus();
+          }, 0);
+        }
+      }
+    });
+
+    panel.addEventListener("click", function (event) {
+      event.stopPropagation();
+    });
+
+    panel.addEventListener("change", function (event) {
+      if (event.target && event.target.matches('input[type="checkbox"]')) {
+        if (opts.onChange) opts.onChange();
+        if (opts.onChangeSummary) opts.onChangeSummary();
+        if (!opts.skipRender) renderTable();
+      }
+    });
+
+    panel.querySelectorAll("[data-action]").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var action = btn.getAttribute("data-action");
+        var boxes = root.querySelectorAll('input[type="checkbox"]');
+        if (action === "all") {
+          boxes.forEach(function (box) {
+            box.checked = true;
+          });
+        } else if (action === "clear") {
+          boxes.forEach(function (box) {
+            box.checked = false;
+          });
+        } else if (action === "me") {
+          boxes.forEach(function (box) {
+            box.checked = box.value === "me";
+          });
+        } else if (action === "visible") {
+          boxes.forEach(function (box) {
+            var row = box.closest(".multi-option");
+            if (row && !row.hidden) box.checked = true;
+          });
+        }
+        if (opts.onChange) opts.onChange();
+        if (opts.onChangeSummary) opts.onChangeSummary();
+        if (!opts.skipRender) renderTable();
+      });
+    });
+  }
+
+  function compareItems(a, b) {
+    var key = state.sortKey;
+    var av = a[key];
+    var bv = b[key];
+
+    if (key === "due") {
+      av = av ? new Date(av).getTime() : Number.POSITIVE_INFINITY;
+      bv = bv ? new Date(bv).getTime() : Number.POSITIVE_INFINITY;
+    } else if (key === "kind") {
+      av = a.kind === "card" ? 1 : 0;
+      bv = b.kind === "card" ? 1 : 0;
+    } else {
+      av = (av || "").toString().toLowerCase();
+      bv = (bv || "").toString().toLowerCase();
+    }
+
+    if (av < bv) return state.sortDir === "asc" ? -1 : 1;
+    if (av > bv) return state.sortDir === "asc" ? 1 : -1;
+    return (a.name || "").localeCompare(b.name || "");
+  }
+
+  function dueBucket(item) {
+    var rowState = itemState(item);
+    if (!item.due) {
+      return { id: "none", label: "No due date", order: 4 };
+    }
+    if (rowState === "complete") {
+      return { id: "done", label: "Completed", order: 5 };
+    }
+    var ts = new Date(item.due).getTime();
+    var now = new Date();
+    if (ts < now.getTime()) {
+      return { id: "overdue", label: "Overdue", order: 0 };
+    }
+    if (ts <= endOfDay(now).getTime()) {
+      return { id: "today", label: "Due today", order: 1 };
+    }
+    if (
+      ts <=
+      endOfDay(new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)).getTime()
+    ) {
+      return { id: "week", label: "Next 7 days", order: 2 };
+    }
+    return { id: "later", label: "Later", order: 3 };
+  }
+
+  function groupInfo(item) {
+    var mode = state.groupBy;
+    if (mode === "none") {
+      return { id: "all", label: "All items", order: 0 };
+    }
+    if (mode === "due") return dueBucket(item);
+    if (mode === "board") {
+      return {
+        id: item.boardId || "unknown-board",
+        label: item.boardName || "Unknown board",
+        order: (item.boardName || "").toLowerCase(),
+      };
+    }
+    if (mode === "assignee") {
+      return {
+        id: item.idMember || "unassigned",
+        label: item.assigneeName || "Unassigned",
+        order: (item.assigneeName || "zzz").toLowerCase(),
+      };
+    }
+    if (mode === "card") {
+      return {
+        id: item.cardId || "unknown-card",
+        label: (item.cardName || "Unknown card") + " · " + (item.boardName || ""),
+        order: (item.cardName || "").toLowerCase(),
+      };
+    }
+    if (mode === "checklist") {
+      return {
+        id:
+          (item.checklistId || item.checklistName || "checklist") +
+          ":" +
+          item.cardId,
+        label:
+          (item.checklistName || "Checklist") +
+          " · " +
+          (item.cardName || ""),
+        order: (item.checklistName || "").toLowerCase(),
+      };
+    }
+    if (mode === "kind") {
+      var isCard = item.kind === "card";
+      return {
+        id: isCard ? "card" : "checkitem",
+        label: isCard ? "Member card" : "Checklist task",
+        order: isCard ? 1 : 0,
+      };
+    }
+    return { id: "all", label: "All items", order: 0 };
+  }
+
+  function buildGroups(items) {
+    var map = {};
+    items.forEach(function (item) {
+      var info = groupInfo(item);
+      if (!map[info.id]) {
+        map[info.id] = {
+          id: info.id,
+          label: info.label,
+          order: info.order,
+          items: [],
+        };
+      }
+      map[info.id].items.push(item);
+    });
+    return Object.keys(map)
+      .map(function (id) {
+        return map[id];
+      })
+      .sort(function (a, b) {
+        if (typeof a.order === "number" && typeof b.order === "number") {
+          return a.order - b.order;
+        }
+        return String(a.order).localeCompare(String(b.order));
+      });
+  }
+
+  function typeLabel(item) {
+    return item.kind === "card" ? "Card" : "Task";
+  }
+
+  function boardHue(name) {
+    var str = String(name || "board");
+    var hash = 0;
+    for (var i = 0; i < str.length; i += 1) {
+      hash = (hash * 31 + str.charCodeAt(i)) % 360;
+    }
+    return hash;
+  }
+
+  function materialIcon(name) {
+    var span = document.createElement("span");
+    span.className = "material-symbols-outlined";
+    span.setAttribute("aria-hidden", "true");
+    span.textContent = name;
+    return span;
+  }
+
+  function createItemRow(item) {
+    var tr = document.createElement("tr");
+    var rowState = itemState(item);
+    if (rowState === "complete") tr.classList.add("is-complete");
+
+    var typeTd = document.createElement("td");
+    typeTd.className = "col-type";
+    var pill = document.createElement("span");
+    pill.className = "type-pill" + (item.kind === "card" ? " is-card" : "");
+    pill.textContent = typeLabel(item);
+    typeTd.appendChild(pill);
+
+    var nameTd = document.createElement("td");
+    nameTd.className = "col-item";
+    var nameWrap = document.createElement("div");
+    nameWrap.className = "item-name";
+    if (item.cardUrl) {
+      var nameLink = document.createElement("a");
+      nameLink.className = "item-name-link";
+      nameLink.href = item.cardUrl;
+      nameLink.target = "_blank";
+      nameLink.rel = "noopener noreferrer";
+      nameLink.textContent = item.name;
+      nameWrap.appendChild(nameLink);
+    } else {
+      nameWrap.textContent = item.name;
+    }
+    var meta = document.createElement("div");
+    meta.className = "item-meta";
+    meta.textContent = item.checklistName || "";
+    nameTd.appendChild(nameWrap);
+    nameTd.appendChild(meta);
+    var mobileBits = [];
+    if (item.cardName) mobileBits.push(item.cardName);
+    if (item.assigneeName) mobileBits.push(item.assigneeName);
+    if (mobileBits.length) {
+      var mobileMeta = document.createElement("div");
+      mobileMeta.className = "item-mobile-meta";
+      mobileMeta.textContent = mobileBits.join(" · ");
+      nameTd.appendChild(mobileMeta);
+    }
+    if (item.labels && item.labels.length) {
+      var labelRow = document.createElement("div");
+      labelRow.className = "item-labels";
+      item.labels.forEach(function (label) {
+        var chip = document.createElement("span");
+        chip.className = "label-chip";
+        chip.setAttribute("data-color", label.color || "null");
+        chip.textContent = label.name || "Label";
+        chip.title = label.name || "Label";
+        labelRow.appendChild(chip);
+      });
+      nameTd.appendChild(labelRow);
+    }
+
+    var boardTd = document.createElement("td");
+    boardTd.className = "col-board";
+    var boardCell = document.createElement("div");
+    boardCell.className = "board-cell";
+    var boardDot = document.createElement("span");
+    boardDot.className = "board-color-dot";
+    boardDot.style.background =
+      "hsl(" + boardHue(item.boardName) + " 48% 46%)";
+    boardDot.setAttribute("aria-hidden", "true");
+    var boardText = document.createElement("div");
+    boardText.textContent = item.boardName || "—";
+    if (item.listName) {
+      var listLine = document.createElement("div");
+      listLine.className = "item-list-name";
+      listLine.textContent = item.listName;
+      boardText.appendChild(listLine);
+    }
+    boardCell.appendChild(boardDot);
+    boardCell.appendChild(boardText);
+    boardTd.appendChild(boardCell);
+
+    var cardTd = document.createElement("td");
+    cardTd.className = "col-card";
+    cardTd.textContent = item.cardName;
+
+    var assigneeTd = document.createElement("td");
+    assigneeTd.className = "col-assignee";
+    assigneeTd.textContent = item.assigneeName || "—";
+
+    var dueTd = document.createElement("td");
+    dueTd.className = "col-due " + dueClass(item.due, rowState);
+    dueTd.textContent = formatDue(item.due);
+
+    var linkTd = document.createElement("td");
+    linkTd.className = "col-link";
+    if (item.cardUrl) {
+      var a = document.createElement("a");
+      a.href = item.cardUrl;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.className = "link-open";
+      a.appendChild(materialIcon("open_in_new"));
+      var openLabel = document.createElement("span");
+      openLabel.textContent = "Open";
+      a.appendChild(openLabel);
+      a.setAttribute(
+        "aria-label",
+        "Open card " + (item.cardName || item.name || "") + " in Trello"
+      );
+      linkTd.appendChild(a);
+    } else {
+      linkTd.textContent = "—";
+    }
+
+    tr.appendChild(typeTd);
+    tr.appendChild(nameTd);
+    tr.appendChild(boardTd);
+    tr.appendChild(cardTd);
+    tr.appendChild(assigneeTd);
+    tr.appendChild(dueTd);
+    tr.appendChild(linkTd);
+    return tr;
+  }
+
+  function updateFocusChips() {
+    if (!els.focusChips) return;
+    var dueValue = els.filterDue.value;
+    els.filterDue.value = "all";
+    var pool = collectRows().filter(matchesFilters);
+    els.filterDue.value = dueValue;
+
+    var counts = { overdue: 0, today: 0, week: 0, myday: 0 };
+    var now = new Date();
+    var dayStart = startOfDay(now).getTime();
+    var dayEnd = endOfDay(now).getTime();
+    pool.forEach(function (item) {
+      if (itemState(item) === "complete") return;
+      var bucket = dueBucket(item).id;
+      if (counts[bucket] != null) counts[bucket] += 1;
+      var dueTs = item.due ? new Date(item.due).getTime() : null;
+      if (!dueTs) return;
+      var isOverdue = dueTs < now.getTime();
+      var isToday = dueTs >= dayStart && dueTs <= dayEnd;
+      if (isOverdue || isToday) counts.myday += 1;
+    });
+
+    els.focusChips.querySelectorAll("[data-due-chip]").forEach(function (chip) {
+      var key = chip.getAttribute("data-due-chip");
+      var active = els.filterDue.value === key;
+      chip.classList.toggle("is-active", active);
+      chip.setAttribute("aria-pressed", active ? "true" : "false");
+      if (key === "all") {
+        chip.textContent = "All dates";
+      } else if (key === "none") {
+        chip.textContent = "Undated queue";
+      } else if (key === "myday") {
+        chip.textContent = "My day (" + counts.myday + ")";
+      } else if (key === "overdue") {
+        chip.textContent = "Overdue (" + counts.overdue + ")";
+      } else if (key === "today") {
+        chip.textContent = "Today (" + counts.today + ")";
+      } else if (key === "week") {
+        chip.textContent = "Next 7 days (" + counts.week + ")";
+      }
+    });
+  }
+
+  function renderCalendarDayDetail(dayItems, dayLabel) {
+    var wrap = document.createElement("div");
+    wrap.className = "cal-expand-panel";
+
+    var head = document.createElement("div");
+    head.className = "cal-expand-head";
+    var title = document.createElement("h3");
+    title.textContent =
+      dayLabel +
+      " · " +
+      dayItems.length +
+      " item" +
+      (dayItems.length === 1 ? "" : "s");
+    var closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "btn btn-ghost cal-expand-close";
+    closeBtn.textContent = "Close";
+    closeBtn.addEventListener("click", function (event) {
+      event.stopPropagation();
+      state.focusCalDayAfterRender = state.expandedCalDay;
+      state.expandedCalDay = null;
+      renderTable();
+    });
+    head.appendChild(title);
+    head.appendChild(closeBtn);
+    wrap.appendChild(head);
+
+    if (!dayItems.length) {
+      var empty = document.createElement("p");
+      empty.className = "cal-expand-empty";
+      empty.textContent = "No matching tasks on this day.";
+      wrap.appendChild(empty);
+      return wrap;
+    }
+
+    var scroll = document.createElement("div");
+    scroll.className = "cal-expand-scroll";
+    var table = document.createElement("table");
+    table.className = "items-table cal-expand-table";
+    table.innerHTML =
+      '<caption class="sr-only">Tasks due ' +
+      String(dayLabel || "").replace(/</g, "") +
+      "</caption>" +
+      "<thead><tr>" +
+      '<th class="col-type" scope="col">Type</th>' +
+      '<th class="col-item" scope="col">Title</th>' +
+      '<th class="col-board" scope="col">Board</th>' +
+      '<th class="col-card" scope="col">Card</th>' +
+      '<th class="col-assignee" scope="col">Assignee</th>' +
+      '<th class="col-due" scope="col">Due</th>' +
+      '<th class="col-link" scope="col">Open</th>' +
+      "</tr></thead>";
+    var tbody = document.createElement("tbody");
+    dayItems.sort(compareItems).forEach(function (item) {
+      tbody.appendChild(createItemRow(item));
+    });
+    table.appendChild(tbody);
+    scroll.appendChild(table);
+    wrap.appendChild(scroll);
+    return wrap;
+  }
+
+  function renderCalendar(filtered) {
+    var month = state.calendarMonth;
+    var year = month.getFullYear();
+    var monthIndex = month.getMonth();
+    els.calendarTitle.textContent = month.toLocaleString(undefined, {
+      month: "long",
+      year: "numeric",
+    });
+
+    var firstDay = new Date(year, monthIndex, 1);
+    var startOffset = (firstDay.getDay() + 6) % 7;
+    var daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+    var todayKey = dateKey(new Date());
+    var MAX_PREVIEW = state.density === "compact" ? 2 : 3;
+
+    var byDay = {};
+    var undated = [];
+    filtered.forEach(function (item) {
+      if (!item.due) {
+        undated.push(item);
+        return;
+      }
+      var key = dateKey(new Date(item.due));
+      if (!byDay[key]) byDay[key] = [];
+      byDay[key].push(item);
+    });
+
+    // Drop expansion if that day is no longer in this month view.
+    if (state.expandedCalDay) {
+      var expandedDate = new Date(state.expandedCalDay + "T12:00:00");
+      if (
+        expandedDate.getMonth() !== monthIndex ||
+        expandedDate.getFullYear() !== year
+      ) {
+        state.expandedCalDay = null;
+      }
+    }
+
+    els.calendarGrid.innerHTML = "";
+    els.calendarGrid.className = "calendar-grid calendar-grid-weeks";
+
+    var totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
+    var weekEl = null;
+    var weekDaysEl = null;
+
+    function startWeek() {
+      weekEl = document.createElement("div");
+      weekEl.className = "cal-week";
+      weekDaysEl = document.createElement("div");
+      weekDaysEl.className = "cal-week-days";
+      weekEl.appendChild(weekDaysEl);
+      els.calendarGrid.appendChild(weekEl);
+    }
+
+    startWeek();
+
+    for (var i = 0; i < totalCells; i += 1) {
+      if (i > 0 && i % 7 === 0) {
+        startWeek();
+      }
+
+      var dayNum = i - startOffset + 1;
+      var cell = document.createElement("div");
+      cell.className = "cal-day";
+
+      if (dayNum < 1 || dayNum > daysInMonth) {
+        cell.classList.add("is-outside");
+        weekDaysEl.appendChild(cell);
+        continue;
+      }
+
+      var current = new Date(year, monthIndex, dayNum);
+      var key = dateKey(current);
+      var dayItems = byDay[key] || [];
+      var isExpanded = state.expandedCalDay === key;
+
+      if (key === todayKey) cell.classList.add("is-today");
+      if (dayItems.length) cell.classList.add("has-items");
+      if (isExpanded) cell.classList.add("is-expanded");
+
+      cell.setAttribute("role", "button");
+      cell.setAttribute("tabindex", "0");
+      cell.setAttribute("data-day-key", key);
+      cell.setAttribute(
+        "aria-expanded",
+        isExpanded ? "true" : "false"
+      );
+      cell.setAttribute(
+        "aria-label",
+        current.toLocaleDateString(undefined, {
+          weekday: "long",
+          month: "long",
+          day: "numeric",
+        }) +
+          ", " +
+          dayItems.length +
+          (dayItems.length === 1 ? " task" : " tasks") +
+          ". " +
+          (isExpanded ? "Activate to collapse." : "Activate to expand.")
+      );
+
+      var heading = document.createElement("div");
+      heading.className = "cal-day-num";
+      var numSpan = document.createElement("span");
+      numSpan.textContent = String(dayNum);
+      heading.appendChild(numSpan);
+      if (dayItems.length) {
+        var countBadge = document.createElement("span");
+        countBadge.className = "cal-day-count";
+        countBadge.textContent = String(dayItems.length);
+        heading.appendChild(countBadge);
+      }
+      var chevron = document.createElement("span");
+      chevron.className = "cal-day-chevron";
+      chevron.setAttribute("aria-hidden", "true");
+      heading.appendChild(chevron);
+      cell.appendChild(heading);
+
+      var list = document.createElement("div");
+      list.className = "cal-day-items";
+      dayItems.slice(0, MAX_PREVIEW).forEach(function (item) {
+        var node = document.createElement("div");
+        node.className =
+          "cal-item" +
+          (dueBucket(item).id === "overdue" ? " is-overdue" : "") +
+          (itemState(item) === "complete" ? " is-complete" : "");
+        var dot = document.createElement("span");
+        dot.className = "cal-item-dot";
+        dot.style.backgroundColor =
+          "hsl(" + boardHue(item.boardName) + " 42% 48%)";
+        dot.title = item.boardName || "Board";
+        var text = document.createElement("span");
+        text.className = "cal-item-text";
+        text.textContent =
+          (item.kind === "card" ? "Card · " : "") + item.name;
+        node.appendChild(dot);
+        node.appendChild(text);
+        node.title =
+          (item.boardName || "Board") +
+          (item.assigneeName ? " · " + item.assigneeName : "") +
+          " — click day for details";
+        list.appendChild(node);
+      });
+      if (dayItems.length > MAX_PREVIEW) {
+        var more = document.createElement("div");
+        more.className = "cal-more";
+        more.innerHTML =
+          '<span class="cal-more-icon" aria-hidden="true"></span>' +
+          '<span>+' +
+          (dayItems.length - MAX_PREVIEW) +
+          " more</span>";
+        list.appendChild(more);
+      }
+      cell.appendChild(list);
+
+      cell.addEventListener("click", function (dayKey) {
+        return function () {
+          state.expandedCalDay =
+            state.expandedCalDay === dayKey ? null : dayKey;
+          state.focusCalDayAfterRender = dayKey;
+          renderTable();
+        };
+      }(key));
+      cell.addEventListener("keydown", function (dayKey) {
+        return function (event) {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            state.expandedCalDay =
+              state.expandedCalDay === dayKey ? null : dayKey;
+            state.focusCalDayAfterRender = dayKey;
+            renderTable();
+          }
+        };
+      }(key));
+
+      weekDaysEl.appendChild(cell);
+
+      // After finishing a week that contains the expanded day, insert detail row.
+      if ((i + 1) % 7 === 0 && state.expandedCalDay) {
+        var expandedInWeek = false;
+        for (var d = i - 6; d <= i; d += 1) {
+          var dn = d - startOffset + 1;
+          if (dn < 1 || dn > daysInMonth) continue;
+          if (dateKey(new Date(year, monthIndex, dn)) === state.expandedCalDay) {
+            expandedInWeek = true;
+            break;
+          }
+        }
+        if (expandedInWeek) {
+          var expandRow = document.createElement("div");
+          expandRow.className = "cal-week-expand";
+          var labelDate = new Date(state.expandedCalDay + "T12:00:00");
+          var label = labelDate.toLocaleDateString(undefined, {
+            weekday: "long",
+            month: "long",
+            day: "numeric",
+            year: "numeric",
+          });
+          expandRow.appendChild(
+            renderCalendarDayDetail(byDay[state.expandedCalDay] || [], label)
+          );
+          weekEl.appendChild(expandRow);
+        }
+      }
+    }
+
+    if (undated.length) {
+      els.calendarUndated.hidden = false;
+      if (els.calendarUndatedText) {
+        els.calendarUndatedText.textContent =
+          undated.length +
+          " matching item" +
+          (undated.length === 1 ? "" : "s") +
+          " have no due date.";
+      } else {
+        els.calendarUndated.textContent =
+          undated.length +
+          " matching item" +
+          (undated.length === 1 ? "" : "s") +
+          " have no due date.";
+      }
+    } else {
+      els.calendarUndated.hidden = true;
+      if (els.calendarUndatedText) els.calendarUndatedText.textContent = "";
+    }
+
+    var focusKey = state.focusCalDayAfterRender;
+    state.focusCalDayAfterRender = null;
+    if (focusKey && els.calendarGrid) {
+      var focusCell = els.calendarGrid.querySelector(
+        '[data-day-key="' + focusKey + '"]'
+      );
+      if (focusCell && focusCell.focus) {
+        setTimeout(function () {
+          focusCell.focus();
+        }, 0);
+      }
+    }
+  }
+
+  function updateViewChrome() {
+    var isCalendar = state.view === "calendar";
+    if (els.viewToggle) {
+      els.viewToggle.querySelectorAll(".view-btn").forEach(function (btn) {
+        var active = btn.getAttribute("data-view") === state.view;
+        btn.classList.toggle("is-active", active);
+        btn.setAttribute("aria-pressed", active ? "true" : "false");
+      });
+    }
+    if (els.groupField) {
+      els.groupField.hidden = isCalendar;
+    }
+    if (els.groupPageSizeField) {
+      els.groupPageSizeField.hidden = isCalendar;
+    }
+    if (els.focusChips) {
+      els.focusChips.hidden = isCalendar;
+    }
+    if (els.filterDue && els.filterDue.closest) {
+      var dueField = els.filterDue.closest(".field");
+      if (dueField) dueField.hidden = isCalendar;
+    }
+  }
+
+  function renderViews() {
+    updateViewChrome();
+    if (!state.data) return;
+
+    var allRows = collectRows();
+    var filtered = allRows.filter(matchesFilters).sort(compareItems);
+    var overdue = filtered.filter(function (item) {
+      return dueBucket(item).id === "overdue";
+    }).length;
+
+    els.resultCount.textContent =
+      filtered.length +
+      " item" +
+      (filtered.length === 1 ? "" : "s") +
+      (overdue ? " · " + overdue + " overdue" : "") +
+      " · " +
+      allRows.length +
+      " total loaded";
+
+    updateFocusChips();
+    updateFilterSummary();
+    updateScanNudge();
+
+    var isEmpty = !filtered.length;
+    els.emptyState.hidden = !isEmpty;
+    if (isEmpty) setEmptyCopy("filtered");
+
+    if (state.view === "calendar") {
+      els.tableWrap.hidden = true;
+      els.calendarWrap.hidden = false;
+      renderCalendar(filtered);
+      return;
+    }
+
+    els.calendarWrap.hidden = true;
+    els.tableWrap.hidden = false;
+    els.itemsBody.innerHTML = "";
+
+    if (isEmpty) return;
+
+    var frag = document.createDocumentFragment();
+    var groups = buildGroups(filtered);
+    var showGroups = state.groupBy !== "none";
+
+    groups.forEach(function (group) {
+      if (showGroups) {
+        var header = document.createElement("tr");
+        header.className = "group-row";
+        var collapsed = Boolean(state.collapsedGroups[group.id]);
+        header.classList.toggle("is-collapsed", collapsed);
+        var cell = document.createElement("td");
+        cell.colSpan = 7;
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "group-toggle";
+        btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+        btn.innerHTML =
+          '<span class="group-caret" aria-hidden="true"></span>' +
+          '<span class="group-label"></span>' +
+          '<span class="group-count"></span>';
+        btn.querySelector(".group-label").textContent = group.label;
+        var limit = visibleCountForGroup(group.id, group.items.length);
+        var countLabel = group.items.length + (group.items.length === 1 ? " item" : " items");
+        if (state.groupPageSize && limit < group.items.length) {
+          countLabel = "showing " + limit + " of " + group.items.length;
+        }
+        btn.querySelector(".group-count").textContent = countLabel;
+        btn.addEventListener("click", function () {
+          state.collapsedGroups[group.id] = !state.collapsedGroups[group.id];
+          savePrefs({ collapsedGroups: state.collapsedGroups });
+          renderViews();
+        });
+        cell.appendChild(btn);
+        header.appendChild(cell);
+        frag.appendChild(header);
+
+        if (collapsed) return;
+      }
+
+      var visibleLimit = visibleCountForGroup(group.id, group.items.length);
+      for (var gi = 0; gi < visibleLimit; gi += 1) {
+        frag.appendChild(createItemRow(group.items[gi]));
+      }
+
+      var remaining = group.items.length - visibleLimit;
+      if (remaining > 0 && state.groupPageSize) {
+        var moreRow = document.createElement("tr");
+        moreRow.className = "group-more-row";
+        var moreCell = document.createElement("td");
+        moreCell.colSpan = 7;
+        var moreBtn = document.createElement("button");
+        moreBtn.type = "button";
+        moreBtn.className = "group-more-btn";
+        var chunk = Math.min(state.groupPageSize, remaining);
+        moreBtn.textContent =
+          "Show next " +
+          chunk +
+          (remaining > chunk ? " · " + remaining + " remaining" : "");
+        moreBtn.setAttribute(
+          "aria-label",
+          "Show next " +
+            chunk +
+            " items in " +
+            (group.label || "this group") +
+            ", " +
+            remaining +
+            " remaining"
+        );
+        moreBtn.addEventListener("click", function () {
+          var current = visibleCountForGroup(group.id, group.items.length);
+          state.groupVisibleCounts[group.id] = current + state.groupPageSize;
+          renderViews();
+        });
+        moreCell.appendChild(moreBtn);
+        moreRow.appendChild(moreCell);
+        frag.appendChild(moreRow);
+      }
+    });
+
+    els.itemsBody.appendChild(frag);
+  }
+
+  function renderTable() {
+    renderViews();
+  }
+
+  function populateSavedViews() {
+    if (!els.savedViews) return;
+    var views = prefsApi.loadViews();
+    var current = els.savedViews.value;
+    var defaultId = prefsApi.loadPrefs().defaultViewId || "";
+    els.savedViews.innerHTML = "";
+    var placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = "Select a saved view…";
+    els.savedViews.appendChild(placeholder);
+    views.forEach(function (view) {
+      var opt = document.createElement("option");
+      opt.value = view.id;
+      opt.textContent =
+        view.name + (view.id === defaultId ? " (default)" : "");
+      els.savedViews.appendChild(opt);
+    });
+    if (current) {
+      els.savedViews.value = current;
+    }
+  }
+
+  function captureCurrentView(name, id) {
+    return {
+      id: id || "view-" + Date.now(),
+      name: name,
+      workType: state.workType,
+      status: els.filterStatus.value,
+      due: els.filterDue.value,
+      groupBy: state.groupBy,
+      view: state.view,
+      sortKey: state.sortKey,
+      sortDir: state.sortDir,
+      collapsedGroups: Object.assign({}, state.collapsedGroups),
+      assignees: getCheckedValues(els.filterAssignee),
+      boards: getCheckedValues(els.filterBoard),
+      labels: els.filterLabel ? getCheckedValues(els.filterLabel) : [],
+      lists: els.filterList ? getCheckedValues(els.filterList) : [],
+      search: els.filterSearch.value || "",
+    };
+  }
+
+  function syncSortHeaders() {
+    document.querySelectorAll("th.sortable").forEach(function (node) {
+      node.classList.remove("sort-asc", "sort-desc");
+      var key = node.getAttribute("data-sort");
+      var base =
+        node.getAttribute("data-label") ||
+        (node.textContent || "").replace(/\s*[↑↓]\s*$/, "").trim();
+      if (!node.getAttribute("data-label")) {
+        node.setAttribute("data-label", base);
+      }
+      if (key === state.sortKey) {
+        node.classList.add(state.sortDir === "asc" ? "sort-asc" : "sort-desc");
+        node.setAttribute(
+          "aria-sort",
+          state.sortDir === "asc" ? "ascending" : "descending"
+        );
+        node.setAttribute(
+          "aria-label",
+          base +
+            ", sorted " +
+            (state.sortDir === "asc" ? "ascending" : "descending")
+        );
+      } else {
+        node.setAttribute("aria-sort", "none");
+        node.setAttribute("aria-label", base + ", activate to sort");
+      }
+    });
+  }
+
+  function applySavedView(view) {
+    if (!view) return;
+    state.workType = view.workType || "both";
+    state.groupBy = view.groupBy || "due";
+    state.view = view.view || "list";
+    state.sortKey = view.sortKey || "due";
+    state.sortDir = view.sortDir === "desc" ? "desc" : "asc";
+    state.collapsedGroups = Object.assign({}, view.collapsedGroups || {});
+    if (els.filterWorkType) els.filterWorkType.value = state.workType;
+    els.filterStatus.value = view.status || "incomplete";
+    els.filterDue.value = view.due || "all";
+    if (els.filterGroup) els.filterGroup.value = state.groupBy;
+    els.filterSearch.value = view.search || "";
+    setCheckedValues(els.filterAssignee, view.assignees || []);
+    setCheckedValues(els.filterBoard, view.boards || []);
+    if (els.filterLabel) setCheckedValues(els.filterLabel, view.labels || []);
+    if (els.filterList) setCheckedValues(els.filterList, view.lists || []);
+    updateAssigneeSummary();
+    updateMultiSummary(els.filterBoard, "All boards", "All boards");
+    if (els.filterLabel) {
+      updateMultiSummary(els.filterLabel, "All labels", "All labels");
+    }
+    if (els.filterList) {
+      updateMultiSummary(els.filterList, "All lists", "All lists");
+    }
+    if (els.savedViewName) els.savedViewName.value = view.name || "";
+    if (els.savedViews && view.id) els.savedViews.value = view.id;
+    syncSortHeaders();
+    savePrefs({
+      workType: state.workType,
+      groupBy: state.groupBy,
+      view: state.view,
+      sortKey: state.sortKey,
+      sortDir: state.sortDir,
+      collapsedGroups: state.collapsedGroups,
+    });
+    renderTable();
+  }
+
+  function setConfigOpen(open) {
+    state.filtersOpen = Boolean(open);
+    savePrefs({ filtersOpen: state.filtersOpen });
+    if (els.configPanel) {
+      els.configPanel.hidden = !state.filtersOpen;
+    }
+    if (els.configToggle) {
+      els.configToggle.setAttribute(
+        "aria-expanded",
+        state.filtersOpen ? "true" : "false"
+      );
+      els.configToggle.classList.toggle("is-active", state.filtersOpen);
+      var label = els.configToggle.querySelector(".btn-label");
+      if (label) {
+        label.textContent = state.filtersOpen ? "Hide filters" : "Filters";
+      }
+    }
+    document.body.classList.toggle("config-open", state.filtersOpen);
+  }
+
+  function updateFilterSummary() {
+    if (!els.filterSummary) return;
+    var bits = [];
+    var work =
+      state.workType === "card"
+        ? "Cards"
+        : state.workType === "checkitem"
+          ? "Tasks"
+          : "Tasks + cards";
+    bits.push(work);
+
+    var assignees = getCheckedValues(els.filterAssignee);
+    if (assignees.length === 1 && assignees[0] === "me") bits.push("Me");
+    else if (assignees.length) bits.push(assignees.length + " assignees");
+
+    if (els.filterStatus.value !== "all") {
+      bits.push(
+        els.filterStatus.value === "incomplete" ? "Open" : "Complete"
+      );
+    }
+    if (els.filterDue.value !== "all" && state.view !== "calendar") {
+      var dueLabels = {
+        myday: "My day",
+        overdue: "Overdue",
+        today: "Today",
+        week: "7 days",
+        none: "Undated",
+      };
+      bits.push(dueLabels[els.filterDue.value] || els.filterDue.value);
+    }
+    var boards = getCheckedValues(els.filterBoard);
+    var boardBoxes = els.filterBoard
+      ? els.filterBoard.querySelectorAll('input[type="checkbox"]').length
+      : 0;
+    if (boards.length && boards.length < boardBoxes) {
+      bits.push("Show " + boards.length + " boards");
+    }
+    if (els.filterLabel) {
+      var labelIds = getCheckedValues(els.filterLabel);
+      if (labelIds.length) bits.push(labelIds.length + " labels");
+    }
+    if (els.filterList) {
+      var listIds = getCheckedValues(els.filterList);
+      if (listIds.length) bits.push(listIds.length + " lists");
+    }
+    var q = (els.filterSearch.value || "").trim();
+    if (q) bits.push('“' + q.slice(0, 18) + (q.length > 18 ? "…" : "") + '”');
+
+    var allow = getAllowlistBoardIds();
+    if (allow && allow.length) bits.push("Scan " + allow.length);
+
+    els.filterSummary.textContent = bits.join(" · ");
+  }
+
+  function setUiAuthorized(isAuthorized) {
+    els.authBtn.hidden = isAuthorized;
+    if (els.workspace) els.workspace.hidden = !isAuthorized;
+    if (els.configToggle) els.configToggle.hidden = !isAuthorized;
+    if (els.metaRow) els.metaRow.hidden = !isAuthorized;
+    if (els.viewToggle) els.viewToggle.hidden = !isAuthorized;
+    if (els.stageBar) els.stageBar.hidden = !isAuthorized;
+    if (els.configPanel) {
+      els.configPanel.hidden = !(isAuthorized && state.filtersOpen);
+    }
+    if (!isAuthorized) {
+      if (els.calendarWrap) els.calendarWrap.hidden = true;
+      if (els.refreshBtn) els.refreshBtn.hidden = true;
+      if (els.syncActions) els.syncActions.hidden = true;
+      stopStatusNudgeWatch();
+      closeSyncMenu();
+    } else {
+      populateSavedViews();
+      setConfigOpen(state.filtersOpen);
+      if (state.data) startStatusNudgeWatch();
+      else stopStatusNudgeWatch();
+      updateAllowlistSummary();
+      syncActionButtons();
+    }
+  }
+
+  function closeSyncMenu() {
+    if (!els.syncMenu || !els.syncMenuBtn) return;
+    els.syncMenu.hidden = true;
+    els.syncMenuBtn.setAttribute("aria-expanded", "false");
+    if (els.syncActions) els.syncActions.classList.remove("is-open");
+  }
+
+  function syncActionButtons() {
+    var ready = Boolean(state.token) && !state.loading;
+    var hasData = Boolean(state.data);
+
+    if (els.refreshBtn) {
+      // Standalone Scan — only before the first successful scan.
+      els.refreshBtn.hidden = !ready || hasData;
+      els.refreshBtn.disabled = !ready || hasData;
+    }
+
+    if (els.syncActions) {
+      // Split Update status + menu — after the first scan.
+      els.syncActions.hidden = !ready || !hasData;
+    }
+
+    if (els.statusBtn) {
+      els.statusBtn.disabled = !ready || !hasData;
+      els.statusBtn.title = hasData
+        ? "Refresh open items already loaded"
+        : "Scan boards first, then Update status can refresh known items";
+    }
+
+    if (els.syncMenuBtn) {
+      els.syncMenuBtn.disabled = !ready || !hasData;
+    }
+
+    if (els.syncScanBtn) {
+      els.syncScanBtn.disabled = !ready;
+    }
+
+    if (els.exportBtn) {
+      els.exportBtn.hidden = !ready || !hasData;
+      els.exportBtn.disabled = !ready || !hasData;
+    }
+
+    if (!hasData) closeSyncMenu();
+  }
+
+  function runScan(options) {
+    var opts = options || {};
+    closeSyncMenu();
+    closeWelcomeModal({ persist: true });
+    closeScanConfirm();
+    if (state.data && !opts.skipConfirm) {
+      openScanConfirm();
+      return;
+    }
+    beginScan();
+  }
+
+  function beginScan() {
+    closeScanConfirm();
+    closeWelcomeModal({ persist: true });
+    closeSyncMenu();
+    if (state.scanAbort) {
+      try {
+        state.scanAbort.abort();
+      } catch (e) {
+        // ignore
+      }
+    }
+    state.scanAbort =
+      typeof AbortController !== "undefined" ? new AbortController() : null;
+    if (!state.demo) api.clearCache();
+    return loadData(true);
+  }
+
+  function cancelScan() {
+    if (state.demoTimer) {
+      clearTimeout(state.demoTimer);
+      state.demoTimer = null;
+    }
+    if (state.scanAbort) {
+      try {
+        state.scanAbort.abort();
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
+
+  function demoDelay(ms) {
+    return new Promise(function (resolve, reject) {
+      if (state.scanAbort && state.scanAbort.signal.aborted) {
+        var early = new Error("Scan cancelled.");
+        early.name = "AbortError";
+        reject(early);
+        return;
+      }
+      state.demoTimer = setTimeout(function () {
+        state.demoTimer = null;
+        if (state.scanAbort && state.scanAbort.signal.aborted) {
+          var err = new Error("Scan cancelled.");
+          err.name = "AbortError";
+          reject(err);
+          return;
+        }
+        resolve();
+      }, ms);
+    });
+  }
+
+  function setScanProgress(done, total, detail, mode) {
+    if (!els.scanProgress) return;
+    els.scanProgress.hidden = false;
+    var pct = total ? Math.round((done / total) * 100) : 0;
+    if (els.scanProgressFill) els.scanProgressFill.style.width = pct + "%";
+    if (els.scanProgressText) {
+      var verb = mode === "update" ? "Updating" : "Scanning boards";
+      els.scanProgressText.textContent =
+        verb +
+        " " +
+        done +
+        "/" +
+        total +
+        (detail ? " · " + detail : "") +
+        " (" +
+        pct +
+        "%)";
+    }
+  }
+
+  function hideScanProgress() {
+    if (els.scanProgress) els.scanProgress.hidden = true;
+    if (els.scanProgressFill) els.scanProgressFill.style.width = "0%";
+  }
+
+  function formatAgo(ts) {
+    if (!ts) return "";
+    var mins = Math.max(0, Math.round((Date.now() - ts) / 60000));
+    if (mins < 1) return "just now";
+    if (mins === 1) return "1 min ago";
+    if (mins < 60) return mins + " min ago";
+    var hours = Math.round(mins / 60);
+    if (hours === 1) return "1 hour ago";
+    if (hours < 48) return hours + " hours ago";
+    var days = Math.round(hours / 24);
+    return days === 1 ? "1 day ago" : days + " days ago";
+  }
+
+  function updateScanNudge() {
+    if (!els.scanNudge) return;
+    if (!state.data || !state.data.fetchedAt || state.loading) {
+      els.scanNudge.hidden = true;
+      return;
+    }
+    var ttl = config.cacheTtlMs || 5 * 60 * 1000;
+    var nudgeAfter = Math.max(ttl, 15 * 60 * 1000);
+    var age = Date.now() - state.data.fetchedAt;
+    els.scanNudge.hidden = age < nudgeAfter;
+  }
+
+  function setEmptyCopy(mode) {
+    if (!els.emptyState) return;
+    var heading = els.emptyState.querySelector("h2");
+    var steps = els.emptyState.querySelector(".empty-steps");
+    var note = els.emptyState.querySelector(".empty-note");
+    if (mode === "idle") {
+      if (heading) heading.textContent = "Ready when you are";
+      if (steps) steps.hidden = false;
+      if (note) {
+        note.hidden = false;
+        note.textContent =
+          "Closing this hub clears the list. Next time you open it, scan again.";
+      }
+    } else {
+      if (heading) heading.textContent = "No matching work";
+      if (steps) steps.hidden = true;
+      if (note) {
+        note.hidden = false;
+        note.textContent =
+          "Try My day, widen filters, open Undated, or scan boards again.";
+      }
+    }
+  }
+
+  function showIdleWorkspace() {
+    state.data = null;
+    state.statusNudgeDismissedUntil = 0;
+    stopStatusNudgeWatch();
+    if (els.resultCount) els.resultCount.textContent = "";
+    if (els.filterSummary) els.filterSummary.textContent = "";
+    if (els.cacheNote) els.cacheNote.textContent = "";
+    if (els.scanNudge) els.scanNudge.hidden = true;
+    if (els.exportBtn) els.exportBtn.hidden = true;
+    hideScanProgress();
+    if (els.tableWrap) els.tableWrap.hidden = true;
+    if (els.calendarWrap) els.calendarWrap.hidden = true;
+    setEmptyCopy("idle");
+    if (els.emptyState) els.emptyState.hidden = false;
+    if (els.focusChips) {
+      els.focusChips.querySelectorAll("[data-due-chip]").forEach(function (chip) {
+        var key = chip.getAttribute("data-due-chip");
+        var active = (els.filterDue && els.filterDue.value) === key;
+        chip.classList.toggle("is-active", active);
+        chip.setAttribute("aria-pressed", active ? "true" : "false");
+        if (key === "all") chip.textContent = "All dates";
+        else if (key === "myday") chip.textContent = "My day";
+        else if (key === "none") chip.textContent = "Undated queue";
+        else if (key === "overdue") chip.textContent = "Overdue";
+        else if (key === "today") chip.textContent = "Today";
+        else chip.textContent = "Next 7 days";
+      });
+    }
+    syncActionButtons();
+  }
+
+  function getFocusableElements(root) {
+    if (!root) return [];
+    return Array.prototype.slice
+      .call(
+        root.querySelectorAll(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        )
+      )
+      .filter(function (el) {
+        if (el.closest("[hidden]")) return false;
+        return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+      });
+  }
+
+  function activeModal() {
+    if (els.welcomeModal && !els.welcomeModal.hidden) return els.welcomeModal;
+    if (els.scanConfirmModal && !els.scanConfirmModal.hidden) {
+      return els.scanConfirmModal;
+    }
+    if (els.privacyModal && !els.privacyModal.hidden) return els.privacyModal;
+    return null;
+  }
+
+  function setPageInert(inert) {
+    var nodes = [
+      document.querySelector("header.topbar"),
+      els.workspace,
+      document.querySelector("footer.site-footer") ||
+        document.querySelector("footer"),
+    ];
+    nodes.forEach(function (node) {
+      if (!node) return;
+      if (inert) {
+        node.setAttribute("inert", "");
+        node.setAttribute("aria-hidden", "true");
+      } else {
+        node.removeAttribute("inert");
+        node.removeAttribute("aria-hidden");
+      }
+    });
+  }
+
+  function openModalShell(modal, focusEl) {
+    if (!modal) return;
+    if (!activeModal()) {
+      state.modalFocusBefore = document.activeElement;
+    }
+    modal.hidden = false;
+    document.body.classList.add("welcome-open");
+    setPageInert(true);
+    setTimeout(function () {
+      var target =
+        focusEl ||
+        getFocusableElements(modal.querySelector(".welcome-dialog"))[0];
+      if (target && target.focus) target.focus();
+    }, 0);
+  }
+
+  function restoreModalFocus() {
+    setPageInert(false);
+    var prev = state.modalFocusBefore;
+    state.modalFocusBefore = null;
+    if (prev && prev.focus && document.contains(prev)) {
+      try {
+        prev.focus();
+      } catch (e) {
+        // ignore
+      }
+    }
+  }
+
+  function closeWelcomeModal(opts) {
+    var options = opts || {};
+    if (els.welcomeModal) els.welcomeModal.hidden = true;
+    if (options.persist) {
+      savePrefs({ welcomeDismissed: true });
+    }
+    if (
+      (!els.scanConfirmModal || els.scanConfirmModal.hidden) &&
+      (!els.privacyModal || els.privacyModal.hidden)
+    ) {
+      document.body.classList.remove("welcome-open");
+      restoreModalFocus();
+    }
+  }
+
+  function showWelcomeModal(force) {
+    if (!els.welcomeModal) return;
+    if (!force && prefsApi.loadPrefs().welcomeDismissed) return;
+    closeScanConfirm();
+    closePrivacyModal();
+    openModalShell(els.welcomeModal, els.welcomeScan || els.welcomeDismiss);
+  }
+
+  function openScanConfirm() {
+    if (!els.scanConfirmModal) {
+      beginScan();
+      return;
+    }
+    closePrivacyModal();
+    openModalShell(els.scanConfirmModal, els.scanConfirmOk);
+  }
+
+  function closeScanConfirm() {
+    if (els.scanConfirmModal) els.scanConfirmModal.hidden = true;
+    if (
+      (!els.welcomeModal || els.welcomeModal.hidden) &&
+      (!els.scanConfirmModal || els.scanConfirmModal.hidden) &&
+      (!els.privacyModal || els.privacyModal.hidden)
+    ) {
+      document.body.classList.remove("welcome-open");
+      restoreModalFocus();
+    }
+  }
+
+  function openPrivacyModal() {
+    if (!els.privacyModal) return;
+    closeWelcomeModal();
+    closeScanConfirm();
+    openModalShell(
+      els.privacyModal,
+      els.privacyModalClose ||
+        els.privacyModal.querySelector(".welcome-dialog button, .welcome-dialog a")
+    );
+  }
+
+  function closePrivacyModal() {
+    if (els.privacyModal) els.privacyModal.hidden = true;
+    if (
+      (!els.welcomeModal || els.welcomeModal.hidden) &&
+      (!els.scanConfirmModal || els.scanConfirmModal.hidden) &&
+      (!els.privacyModal || els.privacyModal.hidden)
+    ) {
+      document.body.classList.remove("welcome-open");
+      restoreModalFocus();
+    }
+  }
+
+  function stopStatusNudgeWatch() {
+    if (state.statusTimer) {
+      clearInterval(state.statusTimer);
+      state.statusTimer = null;
+    }
+    hideStatusRefreshBanner();
+  }
+
+  function statusNudgeMs() {
+    var ms =
+      config.statusNudgeMs != null ? config.statusNudgeMs : config.statusPollMs;
+    return ms;
+  }
+
+  function lastStatusFreshAt() {
+    if (!state.data) return 0;
+    return state.data.statusSyncedAt || state.data.fetchedAt || 0;
+  }
+
+  function hideStatusRefreshBanner() {
+    if (els.statusRefreshBanner) els.statusRefreshBanner.hidden = true;
+  }
+
+  function updateStatusNudge() {
+    if (!els.statusRefreshBanner) return;
+    var ms = statusNudgeMs();
+    if (
+      !state.data ||
+      state.loading ||
+      !ms ||
+      ms < 15000 ||
+      (state.statusNudgeDismissedUntil &&
+        Date.now() < state.statusNudgeDismissedUntil)
+    ) {
+      hideStatusRefreshBanner();
+      return;
+    }
+    var age = Date.now() - lastStatusFreshAt();
+    els.statusRefreshBanner.hidden = age < ms;
+  }
+
+  function startStatusNudgeWatch() {
+    stopStatusNudgeWatch();
+    if (!state.data) return;
+    var ms = statusNudgeMs();
+    if (!ms || ms < 15000) return;
+    updateStatusNudge();
+    // Local age check only — never calls the API by itself.
+    state.statusTimer = setInterval(updateStatusNudge, 30000);
+  }
+
+  function ensureAuthorized() {
+    return t.getRestApi().then(function (rest) {
+      return rest.isAuthorized().then(function (isAuthorized) {
+        if (!isAuthorized) {
+          setUiAuthorized(false);
+          els.subtitle.textContent = "Authorize to load checklist items.";
+          els.tableWrap.hidden = true;
+          if (els.calendarWrap) els.calendarWrap.hidden = true;
+          els.emptyState.hidden = true;
+          showBanner(
+            "Step 1 of 3: authorize with Trello (read-only). Then Scan boards to load your work.",
+            "info"
+          );
+          return null;
+        }
+        setUiAuthorized(true);
+        return rest.getToken();
+      });
+    });
+  }
+
+  function applyDataset(data, options) {
+    var opts = options || {};
+    state.data = data;
+    resetGroupVisibleCounts();
+    populateAllowlistBoards(data.boards);
+    populateBoards(data.boards);
+    populateLabels(data.labels || []);
+    populateLists(data.lists || []);
+    populateAssignees(data.members, data.me);
+    els.cacheNote.textContent = opts.cacheNote || "";
+    if (data.fetchedAt && !opts.skipLastScanned) {
+      var scannedLabel =
+        "Last scan " + formatAgo(data.fetchedAt);
+      els.cacheNote.textContent = els.cacheNote.textContent
+        ? scannedLabel + " · " + els.cacheNote.textContent
+        : scannedLabel;
+    }
+    if (data.meta && data.meta.boardErrors && data.meta.boardErrors.length) {
+      var failCount = data.meta.boardErrors.length;
+      var okCount = Math.max(
+        0,
+        (data.meta.boardCount || 0) - failCount
+      );
+      var failNames = data.meta.boardErrors
+        .slice(0, 4)
+        .map(function (err) {
+          return err.boardName || err.boardId;
+        })
+        .join(", ");
+      var moreFails =
+        failCount > 4 ? " +" + (failCount - 4) + " more" : "";
+      showBanner(
+        "Scan finished with " +
+          okCount +
+          " board" +
+          (okCount === 1 ? "" : "s") +
+          " ok and " +
+          failCount +
+          " issue" +
+          (failCount === 1 ? "" : "s") +
+          ".",
+        "info",
+        {
+          dismissible: true,
+          technical:
+            "Board issues:\n" +
+            data.meta.boardErrors
+              .map(function (err) {
+                return (
+                  "- " +
+                  (err.boardName || err.boardId) +
+                  ": " +
+                  (err.message || "unknown")
+                );
+              })
+              .join("\n") +
+            (failNames ? "\nPreview: " + failNames + moreFails : ""),
+        }
+      );
+    }
+    if (data.meta && !state.demo && !opts.skipMetaAppend) {
+      var parts = [];
+      if (data.meta.httpCalls != null) {
+        parts.push(data.meta.httpCalls + " HTTP calls");
+      }
+      if (data.meta.rateLimitUnits != null) {
+        parts.push("~" + data.meta.rateLimitUnits + " rate-limit units");
+      }
+      if (parts.length) {
+        els.cacheNote.textContent =
+          (els.cacheNote.textContent ? els.cacheNote.textContent + " · " : "") +
+          parts.join(" · ");
+      }
+    }
+    if (!opts.keepSubtitle) {
+      els.subtitle.textContent =
+        opts.subtitle ||
+        "Signed in as " +
+          (data.me.fullName || data.me.username || "member");
+    }
+    state.statusNudgeDismissedUntil = 0;
+    startStatusNudgeWatch();
+    syncActionButtons();
+    updateScanNudge();
+    if (state.applyDefaultViewPending) {
+      state.applyDefaultViewPending = false;
+      var defaultId = prefsApi.loadPrefs().defaultViewId;
+      if (defaultId) {
+        var defaultView = findSavedView(defaultId);
+        if (defaultView) {
+          applySavedView(defaultView);
+          return;
+        }
+      }
+    }
+    renderTable();
+  }
+
+  function loadDemoStatus() {
+    if (!state.data) return Promise.resolve();
+    var changed = 0;
+    // Flip one incomplete sample that is not the overdue showcase (index 0).
+    var flipped = false;
+    state.data.items.forEach(function (item, index) {
+      if (flipped || index === 0) return;
+      if (item.state === "incomplete" && item.due) {
+        var dueTs = new Date(item.due).getTime();
+        if (dueTs > Date.now()) {
+          item.state = "complete";
+          changed += 1;
+          flipped = true;
+        }
+      }
+    });
+    state.data.statusSyncedAt = Date.now();
+    els.cacheNote.textContent =
+      "Status sync · " +
+      changed +
+      " item(s) updated locally (demo) · no board scan";
+    renderTable();
+    return Promise.resolve();
+  }
+
+  function loadStatus(silent) {
+    if (state.loading) return Promise.resolve();
+    if (!state.data) {
+      if (!silent) {
+        showBanner(
+          "Scan boards first to load items. Update status then refreshes what you already have.",
+          "info",
+          { dismissible: true }
+        );
+      }
+      return Promise.resolve();
+    }
+    state.loading = true;
+    syncActionButtons();
+    hideStatusRefreshBanner();
+    if (!silent) clearNonPrivacyBanner();
+
+    var finish = function () {
+      state.loading = false;
+      state.scanAbort = null;
+      hideScanProgress();
+      syncActionButtons();
+      updateStatusNudge();
+    };
+
+    if (state.demo) {
+      if (!silent) {
+        els.subtitle.textContent = "Updating known items…";
+      }
+      if (state.scanAbort) {
+        try {
+          state.scanAbort.abort();
+        } catch (e) {
+          // ignore
+        }
+      }
+      state.scanAbort =
+        typeof AbortController !== "undefined" ? new AbortController() : null;
+      setScanProgress(0, 1, "Updating…", "update");
+      return demoDelay(280)
+        .then(function () {
+          setScanProgress(1, 1, "Done", "update");
+          return loadDemoStatus();
+        })
+        .then(function () {
+          if (!silent) {
+            els.subtitle.textContent = "Demo user · Alex Rivera";
+            showBanner(
+              "Status update only refreshes items already in the list — it does not find brand-new checklist assignments or member cards.",
+              "info",
+              { dismissible: true }
+            );
+          }
+        })
+        .catch(function (err) {
+          if (err && err.name === "AbortError") {
+            showBanner("Update cancelled.", "info", { dismissible: true });
+            els.subtitle.textContent = "Demo user · Alex Rivera";
+            return;
+          }
+          throw err;
+        })
+        .finally(finish);
+    }
+
+    if (state.scanAbort) {
+      try {
+        state.scanAbort.abort();
+      } catch (e) {
+        // ignore
+      }
+    }
+    state.scanAbort =
+      typeof AbortController !== "undefined" ? new AbortController() : null;
+
+    return ensureAuthorized()
+      .then(function (token) {
+        if (!token) return null;
+        state.token = token;
+        if (!silent) {
+          els.subtitle.textContent = "Updating open work…";
+          setScanProgress(0, 1, "Starting…", "update");
+        }
+        return api.refreshKnownStatus(state.token, state.data, {
+          onlyIncomplete: true,
+          signal: state.scanAbort ? state.scanAbort.signal : null,
+          onProgress: function (done, total, label) {
+            if (!silent) {
+              els.subtitle.textContent =
+                (label || "Updating") + " " + done + "/" + total;
+              setScanProgress(done, total, label || "", "update");
+            }
+          },
+        });
+      })
+      .then(function (result) {
+        if (!result) return;
+        var meta = result.meta || {};
+        var note =
+          "Status sync · ~" +
+          (meta.rateLimitUnits != null ? meta.rateLimitUnits : "?") +
+          " rate units · " +
+          (meta.httpCalls || 0) +
+          " HTTP" +
+          (meta.strategy ? " · " + meta.strategy : "");
+        if (meta.updated != null) {
+          note =
+            "Status sync · checked " +
+            (meta.checked || 0) +
+            " · updated " +
+            (meta.updated || 0) +
+            (meta.added ? " · +" + meta.added : "") +
+            (meta.removed ? " · −" + meta.removed : "") +
+            " · " +
+            (meta.httpCalls || 0) +
+            " HTTP · ~" +
+            (meta.rateLimitUnits != null ? meta.rateLimitUnits : "?") +
+            " rate units";
+        }
+
+        applyDataset(result.data, {
+          keepSubtitle: silent,
+          cacheNote: note,
+          skipMetaAppend: true,
+        });
+
+        if (!silent) {
+          showBanner(
+            "Refreshed status for items already in the list. Scan boards to pick up brand-new assignments.",
+            "info",
+            { dismissible: true }
+          );
+        }
+      })
+      .catch(function (err) {
+        if (err && err.name === "AbortError") {
+          if (!silent) {
+            showBanner("Update cancelled.", "info", { dismissible: true });
+            els.subtitle.textContent =
+              "Signed in as " +
+              ((state.data.me &&
+                (state.data.me.fullName || state.data.me.username)) ||
+                "member");
+          }
+          return;
+        }
+        if (!silent) {
+          showErrorBanner(err, "Update status");
+          els.subtitle.textContent = "Status update failed";
+        }
+      })
+      .finally(finish);
+  }
+
+  function loadDemoData(forceRefresh) {
+    setUiAuthorized(true);
+    state.token = "demo-token";
+    els.subtitle.textContent = forceRefresh
+      ? "Reloading demo data…"
+      : "Loading demo data…";
+    showBanner(
+      "Demo mode — sample data only. Read-only hub: open cards in Trello to complete work.",
+      "info"
+    );
+    return new Promise(function (resolve, reject) {
+      demoDelay(forceRefresh ? 250 : 80)
+        .then(function () {
+          applyDataset(window.ChecklistHubMock.buildDataset(), {
+            subtitle: "Demo user · Alex Rivera",
+            cacheNote:
+              "Local mock dataset · boards are member-accessible only · open cards in Trello to complete",
+          });
+          resolve();
+        })
+        .catch(reject);
+    });
+  }
+
+  function loadData(forceRefresh) {
+    if (state.loading) return Promise.resolve();
+    state.loading = true;
+    syncActionButtons();
+    updateScanNudge();
+    if (!state.demo) clearNonPrivacyBanner();
+
+    var finish = function () {
+      state.loading = false;
+      state.scanAbort = null;
+      hideScanProgress();
+      syncActionButtons();
+      updateScanNudge();
+    };
+
+    if (state.demo) {
+      setScanProgress(0, 1, "Demo", "scan");
+      return loadDemoData(forceRefresh)
+        .then(function () {
+          setScanProgress(1, 1, "Done", "scan");
+        })
+        .catch(function (err) {
+          if (err && err.name === "AbortError") {
+            showBanner("Scan cancelled.", "info", { dismissible: true });
+            els.subtitle.textContent = state.data
+              ? "Demo user · Alex Rivera"
+              : "Authorized · press Scan boards to load work";
+            return;
+          }
+          throw err;
+        })
+        .finally(finish);
+    }
+
+    return ensureAuthorized()
+      .then(function (token) {
+        if (!token) return null;
+        state.token = token;
+
+        if (config.appKey === "YOUR_TRELLO_API_KEY") {
+          throw new Error(
+            "Set your Power-Up API key in public/config.js before using Checklist Hub. Or open dashboard.html?demo=1 for a local preview."
+          );
+        }
+
+        els.subtitle.textContent = "Scanning boards…";
+        setScanProgress(0, 1, "Starting…");
+
+        return api.getChecklistData(state.token, {
+          forceRefresh: true,
+          boardIds: getAllowlistBoardIds(),
+          signal: state.scanAbort ? state.scanAbort.signal : null,
+          onProgress: function (done, total, boardName) {
+            els.subtitle.textContent =
+              "Scanning boards " + done + "/" + total + " · " + boardName;
+            setScanProgress(done, total, boardName);
+          },
+        });
+      })
+      .then(function (result) {
+        if (!result) return;
+        var scanned = result.data.scannedBoardIds
+          ? result.data.scannedBoardIds.length
+          : result.data.boards.length;
+        var failed =
+          (result.data.meta &&
+            result.data.meta.boardErrors &&
+            result.data.meta.boardErrors.length) ||
+          0;
+        applyDataset(result.data, {
+          cacheNote:
+            "Synced across " +
+            scanned +
+            " board" +
+            (scanned === 1 ? "" : "s") +
+            (failed ? " · " + failed + " with issues" : ""),
+        });
+      })
+      .catch(function (err) {
+        if (err && err.name === "AbortError") {
+          showBanner("Scan cancelled.", "info", { dismissible: true });
+          els.subtitle.textContent = state.data
+            ? "Signed in as " +
+              ((state.data.me &&
+                (state.data.me.fullName || state.data.me.username)) ||
+                "member")
+            : "Authorized · press Scan boards to load work";
+          return;
+        }
+        showErrorBanner(err, "Scan boards / load data");
+        els.subtitle.textContent = "Something went wrong";
+      })
+      .finally(finish);
+  }
+
+  function bootstrapHub() {
+    state.applyDefaultViewPending = true;
+    if (state.demo) {
+      setUiAuthorized(true);
+      state.token = "demo-token";
+      els.subtitle.textContent = "Demo user · Alex Rivera";
+      showBanner(
+        "Demo mode — sample data only. Read-only hub: open cards in Trello to complete work.",
+        "info"
+      );
+      showIdleWorkspace();
+      showWelcomeModal();
+      return Promise.resolve();
+    }
+
+    return ensureAuthorized().then(function (token) {
+      if (!token) return;
+      state.token = token;
+      els.subtitle.textContent =
+        "Authorized · Step 2: Scan boards to load work";
+      showIdleWorkspace();
+      showWelcomeModal();
+    });
+  }
+
+  els.refreshBtn.addEventListener("click", function () {
+    runScan();
+  });
+
+  if (els.statusBtn) {
+    els.statusBtn.addEventListener("click", function () {
+      loadStatus(false);
+    });
+  }
+
+  if (els.syncMenuBtn) {
+    els.syncMenuBtn.addEventListener("click", function (event) {
+      event.stopPropagation();
+      if (!els.syncMenu || els.syncMenuBtn.disabled) return;
+      var willOpen = els.syncMenu.hidden;
+      closeAllMultiSelects();
+      if (willOpen) {
+        els.syncMenu.hidden = false;
+        els.syncMenuBtn.setAttribute("aria-expanded", "true");
+        if (els.syncActions) els.syncActions.classList.add("is-open");
+      } else {
+        closeSyncMenu();
+      }
+    });
+  }
+
+  if (els.syncScanBtn) {
+    els.syncScanBtn.addEventListener("click", function () {
+      runScan();
+    });
+  }
+
+  if (els.syncMenu) {
+    els.syncMenu.addEventListener("click", function (event) {
+      event.stopPropagation();
+    });
+  }
+
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) updateStatusNudge();
+  });
+
+  els.authBtn.addEventListener("click", function () {
+    if (state.demo) {
+      setUiAuthorized(true);
+      state.token = "demo-token";
+      els.subtitle.textContent = "Demo user · Alex Rivera";
+      showIdleWorkspace();
+      showWelcomeModal(true);
+      return;
+    }
+    t.getRestApi()
+      .then(function (rest) {
+        return rest.authorize({ scope: "read", expiration: "never" });
+      })
+      .then(function () {
+        return ensureAuthorized();
+      })
+      .then(function (token) {
+        if (!token) return;
+        state.token = token;
+        els.subtitle.textContent =
+          "Authorized · Step 2: Scan boards to load work";
+        showIdleWorkspace();
+        showWelcomeModal(true);
+      })
+      .catch(function (err) {
+        if (
+          window.TrelloPowerUp.restApiError &&
+          err instanceof window.TrelloPowerUp.restApiError.AuthDeniedError
+        ) {
+          showBanner("Authorization cancelled.", "info", { dismissible: true });
+          return;
+        }
+        showErrorBanner(err, "Authorize");
+      });
+  });
+
+  [els.filterStatus, els.filterDue].forEach(function (el) {
+    el.addEventListener("change", function () {
+      renderTable();
+    });
+  });
+
+  if (els.filterWorkType) {
+    els.filterWorkType.addEventListener("change", function () {
+      state.workType = els.filterWorkType.value;
+      savePrefs({ workType: state.workType });
+      renderTable();
+    });
+  }
+
+  els.filterSearch.addEventListener("input", function () {
+    if (state.searchTimer) clearTimeout(state.searchTimer);
+    state.searchTimer = setTimeout(function () {
+      state.searchTimer = null;
+      renderTable();
+    }, 200);
+  });
+
+  function applyUndatedQueue() {
+    els.filterDue.value = "none";
+    state.view = "list";
+    savePrefs({ view: state.view });
+    renderTable();
+  }
+
+  if (els.focusChips) {
+    els.focusChips.addEventListener("click", function (event) {
+      var chip = event.target.closest("[data-due-chip]");
+      if (!chip) return;
+      var key = chip.getAttribute("data-due-chip");
+      els.filterDue.value = key;
+      renderTable();
+    });
+  }
+
+  if (els.calendarUndatedBtn) {
+    els.calendarUndatedBtn.addEventListener("click", function () {
+      applyUndatedQueue();
+    });
+  }
+
+  if (els.bannerDismiss) {
+    els.bannerDismiss.addEventListener("click", function () {
+      if (els.banner.className.indexOf("banner-error") >= 0) {
+        showBanner(null);
+        return;
+      }
+      var kind = els.banner.getAttribute("data-banner-kind");
+      if (kind === "privacy") {
+        savePrefs({ privacyBannerDismissed: true });
+      }
+      showBanner(null);
+    });
+  }
+
+  if (els.bannerCopy) {
+    els.bannerCopy.addEventListener("click", function () {
+      var text =
+        (els.bannerTechnical && els.bannerTechnical.textContent) || "";
+      if (!text) return;
+      var done = function () {
+        els.bannerCopy.textContent = "Copied";
+        setTimeout(function () {
+          els.bannerCopy.textContent = "Copy for admin";
+        }, 1600);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(function () {
+          window.prompt("Copy this error report:", text);
+        });
+      } else {
+        window.prompt("Copy this error report:", text);
+      }
+    });
+  }
+
+  if (els.statusRefreshBtn) {
+    els.statusRefreshBtn.addEventListener("click", function () {
+      hideStatusRefreshBanner();
+      loadStatus(false);
+    });
+  }
+
+  if (els.statusRefreshDismiss) {
+    els.statusRefreshDismiss.addEventListener("click", function () {
+      var ms = statusNudgeMs() || 2 * 60 * 1000;
+      state.statusNudgeDismissedUntil = Date.now() + ms;
+      hideStatusRefreshBanner();
+    });
+  }
+
+  if (els.welcomeDismiss) {
+    els.welcomeDismiss.addEventListener("click", function () {
+      closeWelcomeModal({ persist: true });
+    });
+  }
+
+  if (els.welcomeScan) {
+    els.welcomeScan.addEventListener("click", function () {
+      // First scan only: skip confirm. Later opens use the confirm modal.
+      runScan({ skipConfirm: !state.data });
+    });
+  }
+
+  if (els.welcomeHelpBtn) {
+    els.welcomeHelpBtn.addEventListener("click", function () {
+      showWelcomeModal(true);
+    });
+  }
+
+  if (els.scanNudge) {
+    els.scanNudge.addEventListener("click", function () {
+      runScan();
+    });
+  }
+
+  if (els.scanCancelBtn) {
+    els.scanCancelBtn.addEventListener("click", function () {
+      cancelScan();
+    });
+  }
+
+  if (els.scanConfirmOk) {
+    els.scanConfirmOk.addEventListener("click", function () {
+      beginScan();
+    });
+  }
+
+  if (els.scanConfirmCancel) {
+    els.scanConfirmCancel.addEventListener("click", function () {
+      closeScanConfirm();
+    });
+  }
+
+  if (els.scanConfirmModal) {
+    els.scanConfirmModal.addEventListener("click", function (event) {
+      if (
+        event.target &&
+        event.target.hasAttribute("data-scan-confirm-close")
+      ) {
+        closeScanConfirm();
+      }
+    });
+  }
+
+  if (els.welcomeModal) {
+    els.welcomeModal.addEventListener("click", function (event) {
+      if (event.target && event.target.hasAttribute("data-welcome-close")) {
+        closeWelcomeModal({ persist: true });
+      }
+    });
+  }
+
+  if (els.privacyOpenBtn) {
+    els.privacyOpenBtn.addEventListener("click", function () {
+      openPrivacyModal();
+    });
+  }
+
+  if (els.privacyModalClose) {
+    els.privacyModalClose.addEventListener("click", function () {
+      closePrivacyModal();
+    });
+  }
+
+  if (els.privacyModal) {
+    els.privacyModal.addEventListener("click", function (event) {
+      if (event.target && event.target.hasAttribute("data-privacy-close")) {
+        closePrivacyModal();
+      }
+    });
+  }
+
+  if (els.densityToggle) {
+    els.densityToggle.addEventListener("click", function (event) {
+      var btn = event.target.closest("[data-density]");
+      if (!btn) return;
+      applyDensity(btn.getAttribute("data-density"));
+      savePrefs({ density: state.density });
+      if (state.data) renderTable();
+    });
+  }
+
+  if (els.assigneeSearch) {
+    els.assigneeSearch.addEventListener("input", function () {
+      filterAssigneeOptions(els.assigneeSearch.value);
+    });
+    els.assigneeSearch.addEventListener("click", function (event) {
+      event.stopPropagation();
+    });
+    els.assigneeSearch.addEventListener("keydown", function (event) {
+      event.stopPropagation();
+    });
+  }
+
+  if (els.filterGroup) {
+    els.filterGroup.addEventListener("change", function () {
+      state.groupBy = els.filterGroup.value;
+      resetGroupVisibleCounts();
+      savePrefs({ groupBy: state.groupBy });
+      renderTable();
+    });
+  }
+
+  if (els.filterGroupPageSize) {
+    els.filterGroupPageSize.addEventListener("change", function () {
+      var next = Number(els.filterGroupPageSize.value);
+      resetGroupVisibleCounts();
+      savePrefs({ groupPageSize: next });
+      if (els.filterGroupPageSize) {
+        els.filterGroupPageSize.value = String(state.groupPageSize);
+      }
+      renderTable();
+    });
+  }
+
+  if (els.configToggle) {
+    els.configToggle.addEventListener("click", function () {
+      setConfigOpen(!state.filtersOpen);
+    });
+  }
+
+  if (els.configClose) {
+    els.configClose.addEventListener("click", function () {
+      setConfigOpen(false);
+      if (els.configToggle) els.configToggle.focus();
+    });
+  }
+
+  if (els.viewToggle) {
+    els.viewToggle.addEventListener("click", function (event) {
+      var btn = event.target.closest("[data-view]");
+      if (!btn) return;
+      state.view = btn.getAttribute("data-view");
+      savePrefs({ view: state.view });
+      renderTable();
+    });
+  }
+
+  function findSavedView(id) {
+    var views = prefsApi.loadViews();
+    for (var vi = 0; vi < views.length; vi += 1) {
+      if (views[vi].id === id) return views[vi];
+    }
+    return null;
+  }
+
+  if (els.saveViewBtn) {
+    els.saveViewBtn.addEventListener("click", function () {
+      var name =
+        (els.savedViewName && els.savedViewName.value.trim()) ||
+        "Untitled view";
+      var existingId = els.savedViews && els.savedViews.value;
+      var view = captureCurrentView(name, existingId || undefined);
+      prefsApi.upsertView(view);
+      populateSavedViews();
+      els.savedViews.value = view.id;
+      if (els.savedViewName) els.savedViewName.value = view.name;
+      showBanner(
+        existingId ? "Saved view updated." : "Saved view created.",
+        "info",
+        { dismissible: true }
+      );
+    });
+  }
+
+  if (els.renameViewBtn) {
+    els.renameViewBtn.addEventListener("click", function () {
+      var id = els.savedViews && els.savedViews.value;
+      if (!id) {
+        showBanner("Select a saved view to rename.", "info", {
+          dismissible: true,
+        });
+        return;
+      }
+      var existing = findSavedView(id);
+      if (!existing) return;
+      var name =
+        (els.savedViewName && els.savedViewName.value.trim()) || existing.name;
+      existing.name = name;
+      prefsApi.upsertView(existing);
+      populateSavedViews();
+      els.savedViews.value = id;
+      if (els.savedViewName) els.savedViewName.value = name;
+    });
+  }
+
+  if (els.deleteViewBtn) {
+    els.deleteViewBtn.addEventListener("click", function () {
+      var id = els.savedViews && els.savedViews.value;
+      if (!id) {
+        showBanner("Select a saved view to delete.", "info", {
+          dismissible: true,
+        });
+        return;
+      }
+      prefsApi.deleteView(id);
+      if (prefsApi.loadPrefs().defaultViewId === id) {
+        savePrefs({ defaultViewId: "" });
+      }
+      populateSavedViews();
+      if (els.savedViewName) els.savedViewName.value = "";
+      showBanner("Saved view deleted.", "info", { dismissible: true });
+      renderTable();
+    });
+  }
+
+  if (els.defaultViewBtn) {
+    els.defaultViewBtn.addEventListener("click", function () {
+      var id = els.savedViews && els.savedViews.value;
+      if (!id) {
+        showBanner(
+          "Select a saved view first, then set it as default.",
+          "info",
+          { dismissible: true }
+        );
+        return;
+      }
+      savePrefs({ defaultViewId: id });
+      populateSavedViews();
+      els.savedViews.value = id;
+      showBanner(
+        "That view will apply after your next Scan when you open Checklist Hub.",
+        "info",
+        { dismissible: true }
+      );
+    });
+  }
+
+  if (els.savedViews) {
+    els.savedViews.addEventListener("change", function () {
+      var id = els.savedViews.value;
+      if (!id) {
+        if (els.savedViewName) els.savedViewName.value = "";
+        return;
+      }
+      applySavedView(findSavedView(id));
+    });
+  }
+
+  function csvEscape(value) {
+    var text = value == null ? "" : String(value);
+    if (/[",\n\r]/.test(text)) {
+      return '"' + text.replace(/"/g, '""') + '"';
+    }
+    return text;
+  }
+
+  function exportFilteredCsv() {
+    if (!state.data) return;
+    var rows = collectRows().filter(matchesFilters).sort(compareItems);
+    var header = [
+      "Type",
+      "Title",
+      "Board",
+      "List",
+      "Card",
+      "Assignee",
+      "Due",
+      "Status",
+      "Labels",
+      "Checklist",
+      "URL",
+    ];
+    var lines = [header.join(",")];
+    rows.forEach(function (item) {
+      lines.push(
+        [
+          csvEscape(typeLabel(item)),
+          csvEscape(item.name),
+          csvEscape(item.boardName),
+          csvEscape(item.listName || ""),
+          csvEscape(item.cardName),
+          csvEscape(item.assigneeName || ""),
+          csvEscape(item.due || ""),
+          csvEscape(itemState(item)),
+          csvEscape(
+            (item.labels || [])
+              .map(function (l) {
+                return l.name;
+              })
+              .join("; ")
+          ),
+          csvEscape(item.checklistName || ""),
+          csvEscape(item.cardUrl || ""),
+        ].join(",")
+      );
+    });
+    var blob = new Blob([lines.join("\r\n")], {
+      type: "text/csv;charset=utf-8",
+    });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download =
+      "checklist-hub-" +
+      new Date().toISOString().slice(0, 10) +
+      ".csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () {
+      URL.revokeObjectURL(url);
+    }, 1000);
+    showBanner(
+      "Exported " + rows.length + " row" + (rows.length === 1 ? "" : "s") + ".",
+      "info",
+      { dismissible: true }
+    );
+  }
+
+  function shiftCalendarMonth(delta) {
+    state.calendarMonth = startOfMonth(
+      new Date(
+        state.calendarMonth.getFullYear(),
+        state.calendarMonth.getMonth() + delta,
+        1
+      )
+    );
+    state.expandedCalDay = null;
+    if (state.view === "calendar") renderTable();
+  }
+
+  if (els.calPrev) {
+    els.calPrev.addEventListener("click", function () {
+      shiftCalendarMonth(-1);
+    });
+  }
+  if (els.calNext) {
+    els.calNext.addEventListener("click", function () {
+      shiftCalendarMonth(1);
+    });
+  }
+  if (els.calToday) {
+    els.calToday.addEventListener("click", function () {
+      var nextMonth = startOfMonth(new Date());
+      var monthChanged =
+        !state.calendarMonth ||
+        state.calendarMonth.getFullYear() !== nextMonth.getFullYear() ||
+        state.calendarMonth.getMonth() !== nextMonth.getMonth();
+      state.calendarMonth = nextMonth;
+      if (monthChanged) state.expandedCalDay = null;
+      if (state.view === "calendar") renderTable();
+    });
+  }
+
+  wireMultiSelect(els.filterAssignee, {
+    onChangeSummary: function () {
+      updateAssigneeSummary();
+    },
+  });
+  wireMultiSelect(els.filterBoard, {
+    onChangeSummary: function () {
+      updateMultiSummary(els.filterBoard, "All boards", "All boards");
+    },
+  });
+  wireMultiSelect(els.filterLabel, {
+    onChangeSummary: function () {
+      updateMultiSummary(els.filterLabel, "All labels", "All labels");
+    },
+  });
+  wireMultiSelect(els.filterList, {
+    onChangeSummary: function () {
+      updateMultiSummary(els.filterList, "All lists", "All lists");
+    },
+  });
+  wireMultiSelect(els.allowlistBoards, {
+    skipRender: true,
+    onChange: persistAllowlist,
+    onChangeSummary: updateAllowlistSummary,
+  });
+
+  if (els.exportBtn) {
+    els.exportBtn.addEventListener("click", function () {
+      exportFilteredCsv();
+    });
+  }
+
+  document.addEventListener("click", function () {
+    closeAllMultiSelects();
+    closeSyncMenu();
+  });
+
+  function isTypingTarget(target) {
+    if (!target || !target.tagName) return false;
+    var tag = target.tagName.toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select") return true;
+    return Boolean(target.isContentEditable);
+  }
+
+  function focusSearchField() {
+    if (!els.filterSearch) return;
+    if (!state.filtersOpen) setConfigOpen(true);
+    els.filterSearch.focus();
+    els.filterSearch.select();
+  }
+
+  document.addEventListener("keydown", function (event) {
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    var key = event.key;
+    var typing = isTypingTarget(event.target);
+    var modal = activeModal();
+
+    if (modal && key === "Tab") {
+      var dialog = modal.querySelector(".welcome-dialog") || modal;
+      var focusables = getFocusableElements(dialog);
+      if (focusables.length) {
+        var first = focusables[0];
+        var last = focusables[focusables.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+          return;
+        }
+        if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+          return;
+        }
+      }
+    }
+
+    if (key === "Escape") {
+      if (els.privacyModal && !els.privacyModal.hidden) {
+        closePrivacyModal();
+        event.preventDefault();
+        return;
+      }
+      if (els.scanConfirmModal && !els.scanConfirmModal.hidden) {
+        closeScanConfirm();
+        event.preventDefault();
+        return;
+      }
+      if (els.welcomeModal && !els.welcomeModal.hidden) {
+        closeWelcomeModal({ persist: true });
+        event.preventDefault();
+        return;
+      }
+      if (els.syncMenu && !els.syncMenu.hidden) {
+        closeSyncMenu();
+        if (els.syncMenuBtn) els.syncMenuBtn.focus();
+        event.preventDefault();
+        return;
+      }
+      if (state.expandedCalDay) {
+        state.focusCalDayAfterRender = state.expandedCalDay;
+        state.expandedCalDay = null;
+        renderTable();
+        event.preventDefault();
+        return;
+      }
+      if (document.querySelector(".multi-select.is-open")) {
+        var openMulti = document.querySelector(".multi-select.is-open");
+        var multiToggle =
+          openMulti && openMulti.querySelector(".multi-select-toggle");
+        closeAllMultiSelects();
+        if (multiToggle) multiToggle.focus();
+        event.preventDefault();
+        return;
+      }
+      if (state.filtersOpen) {
+        setConfigOpen(false);
+        if (els.configToggle) els.configToggle.focus();
+        event.preventDefault();
+      }
+      return;
+    }
+
+    if (modal || typing) return;
+    if (!state.token || (els.workspace && els.workspace.hidden)) return;
+
+    if (key === "/") {
+      event.preventDefault();
+      focusSearchField();
+      return;
+    }
+    if (key === "f" || key === "F") {
+      event.preventDefault();
+      setConfigOpen(!state.filtersOpen);
+      return;
+    }
+    if (key === "1") {
+      event.preventDefault();
+      state.view = "list";
+      savePrefs({ view: state.view });
+      renderTable();
+      return;
+    }
+    if (key === "2") {
+      event.preventDefault();
+      state.view = "calendar";
+      savePrefs({ view: state.view });
+      renderTable();
+    }
+  });
+
+  function applyColumnSort(th) {
+    var key = th.getAttribute("data-sort");
+    if (!key) return;
+    if (state.sortKey === key) {
+      state.sortDir = state.sortDir === "asc" ? "desc" : "asc";
+    } else {
+      state.sortKey = key;
+      state.sortDir = "asc";
+    }
+    savePrefs({ sortKey: state.sortKey, sortDir: state.sortDir });
+    syncSortHeaders();
+    renderTable();
+  }
+
+  document.querySelectorAll("th.sortable").forEach(function (th) {
+    th.addEventListener("click", function () {
+      applyColumnSort(th);
+    });
+    th.addEventListener("keydown", function (event) {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        applyColumnSort(th);
+      }
+    });
+  });
+  syncSortHeaders();
+
+  populateSavedViews();
+
+  t.render(function () {
+    t.sizeTo("body");
+  });
+
+  bootstrapHub();
+})();

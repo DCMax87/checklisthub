@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Checklist Hub Privacy Policy</title>
+    <link rel="icon" href="./icons/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./css/dashboard.css" />
+  </head>
+  <body class="privacy-page">
+    <main class="privacy-card">
+      <h1>Checklist Hub Privacy Policy</h1>
+      <p><strong>Last updated:</strong> 8 September 2026</p>
+      <p>
+        Checklist Hub is a private Trello Power-Up for your workspace. It reads
+        board, card, checklist, and member data that you authorize so you can
+        review assigned checklist items. It does not complete checklist items or
+        change cards — that stays in Trello.
+      </p>
+
+      <h2>Data we access</h2>
+      <ul>
+        <li>Boards you can see</li>
+        <li>Cards and checklists on those boards</li>
+        <li>Member names/IDs needed to show assignees</li>
+      </ul>
+
+      <h2>How data is stored</h2>
+      <ul>
+        <li>
+          Your OAuth token is stored by Trello in private Power-Up plugin data.
+        </li>
+        <li>
+          Board, card, and checklist contents stay in memory only while the hub
+          tab or modal is open. They are not written to cookies, localStorage, or
+          sessionStorage. Closing it clears that data; the next open needs a new
+          Scan.
+        </li>
+        <li>
+          Compact UI preferences (board allowlist, saved views, density, and
+          similar) may be kept in cookies only on the host that serves this
+          Power-Up.
+        </li>
+      </ul>
+
+      <h2>No third-party exfiltration</h2>
+      <p>
+        Checklist Hub does not send your Trello board, card, or checklist
+        contents to the Power-Up authors, analytics services, or any API other
+        than Trello’s. There is no Checklist Hub backend that receives workspace
+        data — requests go from your browser to Trello after you authorize.
+      </p>
+
+      <h2>Third-party resources</h2>
+      <p>
+        The hosted pages may load these resources so the connector and UI work.
+        They do not receive your checklist payloads from this app:
+      </p>
+      <ul>
+        <li>
+          Trello Power-Up client script from
+          <code>p.trellocdn.com</code> (required inside Trello)
+        </li>
+        <li>Trello REST API at <code>api.trello.com</code> (after authorize)</li>
+        <li>
+          Jost and Material Symbols fonts from Google Fonts
+          (<code>fonts.googleapis.com</code> / <code>fonts.gstatic.com</code>)
+        </li>
+      </ul>
+
+      <h2>Disclaimer</h2>
+      <p>
+        Provided as-is for internal workspace use. CDN availability, Trello API
+        behaviour and rate limits, and browser cookie rules are outside the
+        control of these static files. Host the Power-Up only on a trusted HTTPS
+        origin.
+      </p>
+
+      <h2>Contact</h2>
+      <p>
+        Questions should go to the team that deployed this Power-Up, or to the
+        support email listed in
+        <a href="https://trello.com/power-ups/admin">Trello Power-Up admin</a>.
+      </p>
+    </main>
+  </body>
+</html>

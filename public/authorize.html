@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Authorize Checklist Hub</title>
+    <link rel="icon" href="./icons/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./css/dashboard.css" />
+  </head>
+  <body class="auth-page">
+    <main class="auth-card">
+      <h1>Connect Checklist Hub</h1>
+      <p>
+        Allow this Power-Up to read your boards and checklist items so you can
+        see assigned work across every board you can access in one place.
+        Completing work stays in Trello on the card.
+      </p>
+      <button type="button" id="authorize-btn" class="btn btn-primary">
+        <span class="material-symbols-outlined" aria-hidden="true">lock_open</span>
+        <span class="btn-label">Authorize with Trello</span>
+      </button>
+      <p id="auth-status" class="status-text" role="status" aria-live="polite" hidden></p>
+    </main>
+    <script src="./config.js"></script>
+    <script src="https://p.trellocdn.com/power-up.min.js"></script>
+    <script src="./js/authorize.js"></script>
+  </body>
+</html>
