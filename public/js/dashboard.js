@@ -2211,8 +2211,16 @@
     state.statusTimer = setInterval(updateStatusNudge, 30000);
   }
 
+  function getRestApiClient() {
+    // Trello docs say Promise, but the client returns the RestApi object
+    // (with .authorize / .isAuthorized / .getToken) in current power-up.min.js.
+    var api = t.getRestApi();
+    if (api && typeof api.then === "function") return api;
+    return Promise.resolve(api);
+  }
+
   function ensureAuthorized() {
-    return t.getRestApi().then(function (rest) {
+    return getRestApiClient().then(function (rest) {
       return rest.isAuthorized().then(function (isAuthorized) {
         if (!isAuthorized) {
           setUiAuthorized(false);
@@ -2704,7 +2712,7 @@
       showWelcomeModal(true);
       return;
     }
-    t.getRestApi()
+    getRestApiClient()
       .then(function (rest) {
         return rest.authorize({ scope: "read", expiration: "never" });
       })
@@ -3360,9 +3368,8 @@
 
   populateSavedViews();
 
-  t.render(function () {
-    t.sizeTo("body");
-  });
+  // Fullscreen dashboard: sizeTo is a no-op and triggers host warnings.
+  t.render(function () {});
 
   bootstrapHub();
 })();
