@@ -3,6 +3,8 @@
  * and generate an API key at https://trello.com/power-ups/admin
  *
  * APP_KEY must match the key from your Power-Up's "API key" tab.
+ * This value is public in the browser (Power-Up client keys always are);
+ * protect it with Allowed Origins on the API key tab.
  */
 window.CHECKLIST_HUB_CONFIG = {
   appKey: "b80f2d51e1b906460bc7ff7166238cba",

@@ -231,9 +231,15 @@
     isDemo || !window.TrelloPowerUp
       ? createDemoTrelloClient()
       : window.TrelloPowerUp.iframe({
-          appKey: config.appKey,
-          appName: config.appName,
-          appAuthor: config.appAuthor,
+          appKey: (window.CHECKLIST_HUB_CONFIG &&
+            window.CHECKLIST_HUB_CONFIG.appKey) ||
+            config.appKey,
+          appName: (window.CHECKLIST_HUB_CONFIG &&
+            window.CHECKLIST_HUB_CONFIG.appName) ||
+            config.appName,
+          appAuthor: (window.CHECKLIST_HUB_CONFIG &&
+            window.CHECKLIST_HUB_CONFIG.appAuthor) ||
+            config.appAuthor,
         });
 
   if (isDemo) {
@@ -2335,6 +2341,24 @@
     state.statusTimer = setInterval(updateStatusNudge, 30000);
   }
 
+  function getAppKey() {
+    var live =
+      (window.CHECKLIST_HUB_CONFIG && window.CHECKLIST_HUB_CONFIG.appKey) ||
+      (config && config.appKey) ||
+      "";
+    return String(live).trim();
+  }
+
+  function isApiKeyConfigured() {
+    var key = getAppKey();
+    return Boolean(
+      key &&
+        key !== "YOUR_TRELLO_API_KEY" &&
+        !/^YOUR_/i.test(key) &&
+        key.length >= 16
+    );
+  }
+
   function getRestApiClient() {
     // Trello docs say Promise, but the client returns the RestApi object
     // (with .authorize / .isAuthorized / .getToken) in current power-up.min.js.
@@ -2712,7 +2736,7 @@
         if (!token) return null;
         state.token = token;
 
-        if (config.appKey === "YOUR_TRELLO_API_KEY") {
+        if (!isApiKeyConfigured()) {
           throw new Error(
             "Set your Power-Up API key in public/config.js before using Checklist Hub. Or open dashboard.html?demo=1 for a local preview."
           );
