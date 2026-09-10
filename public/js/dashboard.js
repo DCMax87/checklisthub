@@ -70,6 +70,9 @@
     welcomeScanTeam: document.getElementById("welcome-scan-team"),
     welcomeTeam: document.getElementById("welcome-team"),
     welcomeTeamsBlock: document.getElementById("welcome-teams-block"),
+    welcomeViewsBlock: document.getElementById("welcome-views-block"),
+    welcomeView: document.getElementById("welcome-view"),
+    welcomeScanView: document.getElementById("welcome-scan-view"),
     welcomeLead: document.getElementById("welcome-lead"),
     welcomeHelpBtn: document.getElementById("welcome-help-btn"),
     scanNudge: document.getElementById("scan-nudge"),
@@ -146,6 +149,7 @@
     boardCatalog: null,
     allowlistRescanNeeded: false,
     bannerAction: null,
+    pendingViewId: "",
     teams: [],
     selectedTeamId: "",
     preferredAssignees: null,
@@ -1830,6 +1834,100 @@
     if (current) {
       els.savedViews.value = current;
     }
+    populateWelcomeViews();
+  }
+
+  function populateWelcomeViews() {
+    if (!els.welcomeView) return;
+    var views = prefsApi.loadViews();
+    var current = els.welcomeView.value || state.pendingViewId || "";
+    var defaultId = prefsApi.loadPrefs().defaultViewId || "";
+    els.welcomeView.innerHTML = "";
+    var none = document.createElement("option");
+    none.value = "";
+    none.textContent = "None";
+    els.welcomeView.appendChild(none);
+    views.forEach(function (view) {
+      var opt = document.createElement("option");
+      opt.value = view.id;
+      opt.textContent =
+        view.name + (view.id === defaultId ? " (default)" : "");
+      els.welcomeView.appendChild(opt);
+    });
+    if (current && views.some(function (v) { return v.id === current; })) {
+      els.welcomeView.value = current;
+    } else {
+      els.welcomeView.value = "";
+    }
+    if (els.welcomeViewsBlock) {
+      els.welcomeViewsBlock.hidden = !views.length;
+    }
+    updateWelcomeScanViewButton();
+  }
+
+  function updateWelcomeScanViewButton() {
+    if (!els.welcomeScanView) return;
+    var viewId =
+      (els.welcomeView && els.welcomeView.value) || state.pendingViewId || "";
+    els.welcomeScanView.disabled = !viewId;
+  }
+
+  function clearWelcomeViewSelection() {
+    state.pendingViewId = "";
+    if (els.welcomeView) els.welcomeView.value = "";
+    updateWelcomeScanViewButton();
+  }
+
+  function applyPendingOrDefaultView() {
+    var pendingId = state.pendingViewId;
+    if (pendingId) {
+      state.pendingViewId = "";
+      state.applyDefaultViewPending = false;
+      var pendingView = findSavedView(pendingId);
+      if (pendingView) {
+        applySavedView(pendingView);
+        return true;
+      }
+    }
+    if (state.applyDefaultViewPending) {
+      state.applyDefaultViewPending = false;
+      var defaultId = prefsApi.loadPrefs().defaultViewId;
+      if (defaultId) {
+        var defaultView = findSavedView(defaultId);
+        if (defaultView) {
+          applySavedView(defaultView);
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function applyViewBoardPicks(view) {
+    if (!view) return;
+    var boards = view.boards || [];
+    if (boards.length) {
+      if (
+        els.filterBoard &&
+        els.filterBoard.querySelectorAll('input[type="checkbox"]').length
+      ) {
+        applyAllowlistBoardIds(boards);
+      } else {
+        savePrefs({ allowlist: boards.slice() });
+        updateAllowlistSummary();
+      }
+    }
+    if (view.assignees && view.assignees.length) {
+      state.preferredAssignees = view.assignees.slice();
+      if (
+        els.filterAssignee &&
+        els.filterAssignee.querySelectorAll('input[type="checkbox"]').length
+      ) {
+        setCheckedValues(els.filterAssignee, view.assignees);
+        state.preferredAssignees = getCheckedValues(els.filterAssignee);
+        updateAssigneeSummary();
+      }
+    }
   }
 
   function captureCurrentView(name, id) {
@@ -2141,9 +2239,13 @@
       state.catalogMe = catalog.me;
     }
     populateAllowlistBoards((catalog && catalog.boards) || []);
+    if (state.pendingViewId) {
+      applyViewBoardPicks(findSavedView(state.pendingViewId));
+    }
     updateAllowlistSummary();
     syncActionButtons();
     syncWelcomeTeamsUi();
+    populateWelcomeViews();
     if (!state.data) {
       setEmptyCopy("pick-boards");
       if (els.emptyState) els.emptyState.hidden = false;
@@ -2572,11 +2674,14 @@
     closePrivacyModal();
     closeApiUsageModal();
     syncWelcomeTeamsUi();
+    populateWelcomeViews();
     var focusEl =
       (els.welcomeTeamsBlock &&
         !els.welcomeTeamsBlock.hidden &&
         els.welcomeTeam) ||
-      els.welcomeScanTeam ||
+      (els.welcomeViewsBlock &&
+        !els.welcomeViewsBlock.hidden &&
+        els.welcomeView) ||
       els.welcomeScan ||
       els.welcomeDismiss;
     openModalShell(els.welcomeModal, focusEl);
@@ -2812,17 +2917,7 @@
     startStatusNudgeWatch();
     syncActionButtons();
     updateScanNudge();
-    if (state.applyDefaultViewPending) {
-      state.applyDefaultViewPending = false;
-      var defaultId = prefsApi.loadPrefs().defaultViewId;
-      if (defaultId) {
-        var defaultView = findSavedView(defaultId);
-        if (defaultView) {
-          applySavedView(defaultView);
-          return;
-        }
-      }
-    }
+    if (applyPendingOrDefaultView()) return;
     renderTable();
   }
 
@@ -3174,17 +3269,31 @@
 
   function syncWelcomeTeamsUi() {
     var hasTeams = state.teams && state.teams.length > 0;
+    var hasViews = prefsApi.loadViews().length > 0;
     if (els.welcomeTeamsBlock) {
       els.welcomeTeamsBlock.hidden = !hasTeams;
     }
+    if (els.welcomeViewsBlock) {
+      els.welcomeViewsBlock.hidden = !hasViews;
+    }
     if (els.welcomeLead) {
       if (!state.boardsReady) {
-        els.welcomeLead.textContent = hasTeams
-          ? "Listing boards… or Load team checklists once a team is selected."
-          : "Listing available boards… then tick Boards and Load checklists.";
-      } else if (hasTeams) {
+        if (hasTeams && hasViews) {
+          els.welcomeLead.textContent =
+            "Listing boards… Pick a team or a saved view for a faster start.";
+        } else if (hasTeams) {
+          els.welcomeLead.textContent =
+            "Listing boards… or Load team checklists once a team is selected.";
+        } else if (hasViews) {
+          els.welcomeLead.textContent =
+            "Listing boards… or pick a saved view to reuse your board picks.";
+        } else {
+          els.welcomeLead.textContent =
+            "Listing available boards… then tick Boards and Load checklists.";
+        }
+      } else if (hasTeams || hasViews) {
         els.welcomeLead.textContent =
-          "Pick a team (preselects boards) or tick Boards yourself, then Load checklists.";
+          "Pick a team or saved view, or tick Boards yourself, then Load checklists.";
       } else {
         els.welcomeLead.textContent =
           "Tick boards under Filters → Boards, then Load checklists. Day to day, prefer Update status.";
@@ -3208,6 +3317,7 @@
       }
     }
     updateWelcomeScanTeamButton();
+    updateWelcomeScanViewButton();
   }
 
   function updateWelcomeScanTeamButton() {
@@ -3724,6 +3834,7 @@
       if (els.welcomeTeam) els.welcomeTeam.value = "";
       if (els.filterTeam) els.filterTeam.value = "";
       state.selectedTeamId = "";
+      clearWelcomeViewSelection();
       closeWelcomeModal({ skipSession: true });
       if (!state.boardsReady) {
         loadBoardList();
@@ -3742,6 +3853,8 @@
         state.selectedTeamId = "";
         return;
       }
+      // Team and saved view are alternative starters.
+      clearWelcomeViewSelection();
       applySelectedTeam(teamId).then(function () {
         updateWelcomeScanTeamButton();
       });
@@ -3755,6 +3868,7 @@
         state.selectedTeamId ||
         "";
       if (!teamId) return;
+      clearWelcomeViewSelection();
       closeWelcomeModal({ skipSession: true });
       applySelectedTeam(teamId).then(function () {
         if (teamBlocksScan() && !getAllowlistBoardIds().length) {
@@ -3774,6 +3888,50 @@
         }
         go();
       });
+    });
+  }
+
+  if (els.welcomeView) {
+    els.welcomeView.addEventListener("change", function () {
+      var viewId = els.welcomeView.value || "";
+      updateWelcomeScanViewButton();
+      if (!viewId) {
+        state.pendingViewId = "";
+        return;
+      }
+      // Saved view and team are alternative starters.
+      if (els.welcomeTeam) els.welcomeTeam.value = "";
+      if (els.filterTeam) els.filterTeam.value = "";
+      state.selectedTeamId = "";
+      state.pendingViewId = viewId;
+      state.applyDefaultViewPending = false;
+      applyViewBoardPicks(findSavedView(viewId));
+      updateWelcomeScanViewButton();
+    });
+  }
+
+  if (els.welcomeScanView) {
+    els.welcomeScanView.addEventListener("click", function () {
+      var viewId =
+        (els.welcomeView && els.welcomeView.value) || state.pendingViewId || "";
+      if (!viewId) return;
+      if (els.welcomeTeam) els.welcomeTeam.value = "";
+      if (els.filterTeam) els.filterTeam.value = "";
+      state.selectedTeamId = "";
+      state.pendingViewId = viewId;
+      state.applyDefaultViewPending = false;
+      applyViewBoardPicks(findSavedView(viewId));
+      closeWelcomeModal({ skipSession: true });
+      var go = function () {
+        runScan({ skipConfirm: true, forceFull: true });
+      };
+      if (!state.boardsReady) {
+        return loadBoardList({ silent: true }).then(function () {
+          applyViewBoardPicks(findSavedView(viewId));
+          go();
+        });
+      }
+      go();
     });
   }
 

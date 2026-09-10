@@ -394,25 +394,34 @@
               <label class="field-label" for="saved-views">Saved views</label>
             </div>
             <div class="saved-views">
-              <select id="saved-views">
+              <select id="saved-views" aria-label="Choose a saved view">
                 <option value="">—</option>
               </select>
               <label class="sr-only" for="saved-view-name">View name</label>
               <input
                 id="saved-view-name"
                 type="text"
-                placeholder="View name"
+                placeholder="Name for Save / Rename"
                 autocomplete="off"
               />
               <div class="saved-views-actions">
                 <button type="button" id="save-view-btn" class="btn btn-ghost">Save</button>
                 <button type="button" id="rename-view-btn" class="btn btn-ghost">Rename</button>
                 <button type="button" id="delete-view-btn" class="btn btn-ghost">Delete</button>
-                <button type="button" id="default-view-btn" class="btn btn-ghost">
+                <button
+                  type="button"
+                  id="default-view-btn"
+                  class="btn btn-ghost"
+                  title="Apply this view automatically after Load checklists"
+                >
                   Set as default
                 </button>
               </div>
             </div>
+            <p class="field-hint">
+              Saves your current filters, boards, and grouping. Pick one on the
+              welcome screen next time for a faster start.
+            </p>
           </div>
           <p class="prefs-privacy-note">
             Preferences use cookies only. Trello data stays in memory while this
@@ -766,6 +775,21 @@
           <button type="button" id="welcome-scan-team" class="btn btn-primary" disabled>
             <span class="material-symbols-outlined" aria-hidden="true">group</span>
             <span class="btn-label">Load team checklists</span>
+          </button>
+        </div>
+
+        <div id="welcome-views-block" class="welcome-teams" hidden>
+          <label class="field-label" for="welcome-view">Saved view</label>
+          <select id="welcome-view" aria-describedby="welcome-view-hint">
+            <option value="">None</option>
+          </select>
+          <p id="welcome-view-hint" class="welcome-note">
+            Optional alternative to a team — applies your saved filters and board
+            picks, then loads checklists.
+          </p>
+          <button type="button" id="welcome-scan-view" class="btn btn-primary" disabled>
+            <span class="material-symbols-outlined" aria-hidden="true">bookmark</span>
+            <span class="btn-label">Load with this view</span>
           </button>
         </div>
 

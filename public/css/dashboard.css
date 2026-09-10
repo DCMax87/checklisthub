@@ -495,21 +495,35 @@ h2 {
 
 .config-panel .saved-views {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 8px 10px;
+  align-items: stretch;
+}
+
+.config-panel .saved-views > select,
+.config-panel .saved-views > input {
+  width: 100%;
+  min-width: 0;
 }
 
 .config-panel .saved-views-actions {
+  grid-column: 1 / -1;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  align-items: center;
 }
 
 .config-panel .saved-views-actions .btn {
-  height: 2.5rem;
-  padding: 0 0.85rem;
+  height: 2.25rem;
+  min-height: 2.25rem;
+  padding: 0 0.75rem;
   white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.config-panel .field-saved .field-hint {
+  margin-top: 0.35rem;
 }
 
 .content-stage {
@@ -668,7 +682,8 @@ h2 {
   }
 
   .config-panel .saved-views-actions .btn {
-    flex: 1;
+    flex: 1 1 calc(50% - 6px);
+    min-width: 0;
   }
 
   .content-stage {
@@ -1084,14 +1099,14 @@ th.sortable:focus-visible,
 }
 
 .saved-views {
-  display: flex;
-  gap: 6px;
-  align-items: center;
+  display: grid;
+  gap: 8px;
+  align-items: stretch;
 }
 
 .saved-views select {
-  flex: 1;
   min-width: 0;
+  width: 100%;
 }
 
 .chip-emphasis {
@@ -1129,10 +1144,6 @@ th.sortable:focus-visible,
   .prefs-bar {
     margin-left: 14px;
     margin-right: 14px;
-  }
-
-  .saved-views {
-    flex-wrap: wrap;
   }
 }
 
