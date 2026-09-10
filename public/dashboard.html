@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Checklist Hub</title>
     <link rel="icon" href="./icons/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./css/dashboard.css?v=20260910c" />
+    <link rel="stylesheet" href="./css/dashboard.css?v=20260910e" />
   </head>
   <body class="dashboard-page">
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -67,8 +67,8 @@
           hidden
           title="Scan allowlisted boards (or all accessible boards)"
         >
-          <span class="material-symbols-outlined" aria-hidden="true">radar</span>
-          <span class="btn-label">Scan boards</span>
+          <span class="material-symbols-outlined" aria-hidden="true">folder_open</span>
+          <span class="btn-label">List boards</span>
         </button>
         <div class="split-action" id="sync-actions" hidden>
           <button
@@ -98,10 +98,10 @@
             <button type="button" id="sync-scan-btn">
               <span class="split-action-item-title">
                 <span class="material-symbols-outlined" aria-hidden="true">radar</span>
-                Scan boards
+                Load checklists
               </span>
               <span class="split-action-item-desc">
-                Full pass for newly assigned work
+                Pull items from Boards to load (not just refresh names)
               </span>
             </button>
           </div>
@@ -241,7 +241,7 @@
             <p id="filter-team-hint" class="field-hint">
               Teams come from checklists named
               <code>Checklist Hub Team: …</code> on the board you opened from.
-              Choosing a team sets Assignees and replaces Scan these boards.
+              Choosing a team sets Assignees and Boards to load.
               Group by Assignee to list Unassigned last.
             </p>
           </div>
@@ -322,7 +322,7 @@
           </div>
           <div class="field">
             <div class="field-label-block">
-              <span class="field-label" id="allowlist-boards-label">Scan these boards</span>
+              <span class="field-label" id="allowlist-boards-label">Boards to load</span>
             </div>
             <div
               class="multi-select"
@@ -349,10 +349,19 @@
                 <div class="multi-select-actions">
                   <button type="button" data-action="all">Select all</button>
                   <button type="button" data-action="clear">Clear</button>
+                  <button type="button" id="refresh-board-list-btn" data-action="refresh-list">
+                    Refresh list
+                  </button>
                 </div>
                 <div id="allowlist-board-options" class="multi-options"></div>
               </div>
             </div>
+            <p class="field-hint">
+              <strong>List boards</strong> fills names only (cheap).
+              <strong>Load checklists</strong> pulls items from the boards you
+              tick here. Ticking a new board later needs Load checklists again —
+              Refresh list only updates names.
+            </p>
           </div>
           <div class="field">
             <div class="field-label-block">
@@ -540,19 +549,20 @@
           <h2>Ready when you are</h2>
           <ol class="empty-steps">
             <li>
-              <strong>Authorize</strong> with Trello once (read access only).
+              <strong>Authorize</strong> once (read-only).
             </li>
             <li>
-              <strong>Scan boards</strong> to load checklist items and member
-              cards.
+              <strong>List boards</strong>, tick the ones you need under Boards
+              to load.
             </li>
             <li>
-              <strong>Open cards in Trello</strong> to complete work — this hub
-              stays read-only.
+              <strong>Load checklists</strong> for those boards only — then open
+              cards in Trello to finish work.
             </li>
           </ol>
           <p class="empty-note">
-            Closing this hub clears the list. Next time you open it, scan again.
+            Closing the hub clears checklist data. Board picks can stay in a
+            cookie; list boards again only if names are out of date.
           </p>
         </section>
         <div class="table-wrap" id="table-wrap" hidden>
@@ -773,15 +783,16 @@
         <div id="welcome-teams-block" class="welcome-teams" hidden>
           <label class="field-label" for="welcome-team">Team</label>
           <select id="welcome-team" aria-describedby="welcome-team-hint">
-            <option value="">None — use Scan boards below</option>
+            <option value="">None — use List / Load below</option>
           </select>
           <p id="welcome-team-hint" class="welcome-note">
-            Teams come from <code>Checklist Hub Team: …</code> checklists on this
-            board. Choosing one limits Scan to that team’s boards and assignees.
+            Teams come from <code>Checklist Hub Team: …</code> on this board.
+            Choosing one sets Boards to load and assignees, then you can load
+            checklists for just those boards.
           </p>
           <button type="button" id="welcome-scan-team" class="btn btn-primary" disabled>
             <span class="material-symbols-outlined" aria-hidden="true">group</span>
-            <span class="btn-label">Scan this team</span>
+            <span class="btn-label">Load team checklists</span>
           </button>
         </div>
 
@@ -794,10 +805,10 @@
             type="button"
             id="welcome-scan"
             class="btn btn-ghost"
-            title="Uses Scan these boards in Filters, or all boards if none are selected"
+            title="List board names first, or load checklists for selected boards"
           >
-            <span class="material-symbols-outlined" aria-hidden="true">radar</span>
-            <span class="btn-label">Scan boards</span>
+            <span class="material-symbols-outlined" aria-hidden="true">folder_open</span>
+            <span class="btn-label">List boards</span>
           </button>
         </div>
       </div>
@@ -813,16 +824,15 @@
     >
       <div class="welcome-backdrop" data-scan-confirm-close></div>
       <div class="welcome-dialog">
-        <h2 id="scan-confirm-title">Scan boards again?</h2>
+        <h2 id="scan-confirm-title">Load checklists again?</h2>
         <p class="welcome-lead">
-          This runs a full Scan of your allowlisted boards (or all boards you
-          can access). Use it to pick up newly assigned checklist work and
-          member cards.
+          This pulls checklist items from <strong>Boards to load</strong> (or
+          all boards if none are selected). It is not the same as refreshing the
+          board name list.
         </p>
         <p class="welcome-note">
-          Prefer Update status for day-to-day refreshes of items already in
-          this list — it updates their open/complete state without scanning
-          every board for brand-new assignments.
+          Prefer <strong>Update status</strong> for items you already have open.
+          Use this when you added boards to load, or want newly assigned work.
         </p>
         <div class="welcome-actions">
           <button type="button" id="scan-confirm-cancel" class="btn btn-ghost">
@@ -831,7 +841,7 @@
           </button>
           <button type="button" id="scan-confirm-ok" class="btn btn-primary">
             <span class="material-symbols-outlined" aria-hidden="true">radar</span>
-            <span class="btn-label">Scan boards</span>
+            <span class="btn-label">Load checklists</span>
           </button>
         </div>
       </div>
@@ -842,7 +852,7 @@
     <script src="./js/cookies.js?v=20260910a"></script>
     <script src="./js/prefs.js?v=20260910a"></script>
     <script src="./js/mock-data.js?v=20260910a"></script>
-    <script src="./js/api.js?v=20260910a"></script>
-    <script src="./js/dashboard.js?v=20260910c"></script>
+    <script src="./js/api.js?v=20260910e"></script>
+    <script src="./js/dashboard.js?v=20260910e"></script>
   </body>
 </html>

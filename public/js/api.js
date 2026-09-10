@@ -935,6 +935,68 @@
     };
   }
 
+  async function loadBoardCatalog(token, options) {
+    const opts = options || {};
+    assertNotAborted(opts.signal || null);
+
+    const bootstrap = await fetchBatch(
+      [
+        "/members/me?" +
+          new URLSearchParams({ fields: "id,fullName,username" }).toString(),
+        "/members/me/boards?" +
+          new URLSearchParams({
+            filter: "open",
+            fields: "id,name,shortLink,dateLastActivity",
+            lists: "none",
+          }).toString(),
+      ],
+      token,
+      { signal: opts.signal || null, label: "board-catalog" }
+    );
+
+    const meStatus = batchItemStatus(bootstrap[0]);
+    const boardsStatus = batchItemStatus(bootstrap[1]);
+    if (!meStatus.ok || !meStatus.data) {
+      const err = new Error(
+        meStatus.message || "Could not load the signed-in Trello member."
+      );
+      err.name = "TrelloApiError";
+      throw err;
+    }
+    if (!boardsStatus.ok || !boardsStatus.data) {
+      const err = new Error(
+        boardsStatus.message || "Could not load your open boards."
+      );
+      err.name = "TrelloApiError";
+      throw err;
+    }
+
+    const me = meStatus.data;
+    const boards = (boardsStatus.data || [])
+      .map(function (b) {
+        return {
+          id: b.id,
+          name: b.name || b.id,
+          shortLink: b.shortLink || "",
+          dateLastActivity: b.dateLastActivity || "",
+        };
+      })
+      .sort(function (a, b) {
+        return String(a.name).localeCompare(String(b.name));
+      });
+
+    return {
+      me: me,
+      boards: boards,
+      meta: {
+        httpCalls: 1,
+        rateLimitUnits: 2,
+        boardCount: boards.length,
+        strategy: "board catalog only (no checklists)",
+      },
+    };
+  }
+
   async function getChecklistData(token, options) {
     const opts = options || {};
     const cached = readCache();
@@ -1443,6 +1505,7 @@
 
   global.ChecklistHubApi = {
     getChecklistData: getChecklistData,
+    loadBoardCatalog: loadBoardCatalog,
     refreshKnownStatus: refreshKnownStatus,
     refreshKnownItems: refreshKnownItems,
     refreshKnownMemberCards: refreshKnownMemberCards,

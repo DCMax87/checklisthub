@@ -139,6 +139,9 @@
     modalFocusBefore: null,
     demo: isDemo,
     welcomeSkippedThisSession: false,
+    boardsReady: false,
+    boardCatalog: null,
+    allowlistRescanNeeded: false,
     teams: [],
     selectedTeamId: "",
     preferredAssignees: null,
@@ -635,6 +638,7 @@
     var ids = getCheckedValues(els.allowlistBoards);
     savePrefs({ allowlist: ids });
     updateAllowlistSummary();
+    updateAllowlistRescanNudge();
   }
 
   function populateAllowlistBoards(boards) {
@@ -961,6 +965,8 @@
             var row = box.closest(".multi-option");
             if (row && !row.hidden) box.checked = true;
           });
+        } else if (action === "refresh-list") {
+          return;
         }
         if (opts.onChange) opts.onChange();
         if (opts.onChangeSummary) opts.onChangeSummary();
@@ -1908,7 +1914,7 @@
     if (q) bits.push('“' + q.slice(0, 18) + (q.length > 18 ? "…" : "") + '”');
 
     var allow = getAllowlistBoardIds();
-    if (allow && allow.length) bits.push("Scan " + allow.length);
+    if (allow && allow.length) bits.push("Load " + allow.length);
 
     els.filterSummary.textContent = bits.join(" · ");
   }
@@ -1951,9 +1957,22 @@
     var hasData = Boolean(state.data);
 
     if (els.refreshBtn) {
-      // Standalone Scan — only before the first successful scan.
+      // Standalone primary action before the first successful checklist scan.
       els.refreshBtn.hidden = !ready || hasData;
       els.refreshBtn.disabled = !ready || hasData;
+      var label = els.refreshBtn.querySelector(".btn-label");
+      var icon = els.refreshBtn.querySelector(".material-symbols-outlined");
+      if (!state.boardsReady) {
+        if (label) label.textContent = "List boards";
+        if (icon) icon.textContent = "folder_open";
+        els.refreshBtn.title =
+          "Cheap step: load open board names only (no checklist items yet)";
+      } else {
+        if (label) label.textContent = "Load checklists";
+        if (icon) icon.textContent = "radar";
+        els.refreshBtn.title =
+          "Load checklist items from Boards to load (or all if none selected)";
+      }
     }
 
     if (els.syncActions) {
@@ -1964,8 +1983,8 @@
     if (els.statusBtn) {
       els.statusBtn.disabled = !ready || !hasData;
       els.statusBtn.title = hasData
-        ? "Refresh open items already loaded"
-        : "Scan boards first, then Update status can refresh known items";
+        ? "Refresh open/complete state for items already loaded"
+        : "Load checklists first, then Update status can refresh known items";
     }
 
     if (els.syncMenuBtn) {
@@ -1987,8 +2006,14 @@
   function runScan(options) {
     var opts = options || {};
     closeSyncMenu();
-    closeWelcomeModal({ persist: true });
+    closeWelcomeModal({ persist: true, skipSession: true });
     closeScanConfirm();
+    if (!state.boardsReady && !opts.forceFull && !opts.boardListOnly) {
+      return loadBoardList();
+    }
+    if (opts.boardListOnly) {
+      return loadBoardList();
+    }
     if (state.data && !opts.skipConfirm) {
       openScanConfirm();
       return;
@@ -1998,8 +2023,17 @@
 
   function beginScan() {
     closeScanConfirm();
-    closeWelcomeModal({ persist: true });
+    closeWelcomeModal({ persist: true, skipSession: true });
     closeSyncMenu();
+    if (!state.boardsReady) {
+      return loadBoardList().then(function () {
+        showBanner(
+          "Board list ready. Tick Boards to load in Filters, then Load checklists.",
+          "info",
+          { dismissible: true, bannerKind: "board-pick" }
+        );
+      });
+    }
     if (teamBlocksScan()) {
       var team = findTeamById(state.selectedTeamId);
       showBanner(
@@ -2022,6 +2056,203 @@
       typeof AbortController !== "undefined" ? new AbortController() : null;
     if (!state.demo) api.clearCache();
     return loadData(true);
+  }
+
+  function applyBoardCatalog(catalog, options) {
+    var opts = options || {};
+    state.boardCatalog = catalog;
+    state.boardsReady = true;
+    if (catalog && catalog.me && !state.data) {
+      // Keep me available for assignee defaults before full scan.
+      state.catalogMe = catalog.me;
+    }
+    populateAllowlistBoards((catalog && catalog.boards) || []);
+    if (state.selectedTeamId) {
+      var team = findTeamById(state.selectedTeamId);
+      if (team && team.boardIds && team.boardIds.length) {
+        applyAllowlistBoardIds(team.boardIds);
+      }
+    }
+    updateAllowlistSummary();
+    syncActionButtons();
+    syncWelcomeTeamsUi();
+    if (!state.data) {
+      setEmptyCopy("pick-boards");
+      if (els.emptyState) els.emptyState.hidden = false;
+      if (!opts.silent) {
+        showBanner(
+          "Tick boards under Filters → Boards to load, then press Load checklists.",
+          "info",
+          { dismissible: true, bannerKind: "board-pick" }
+        );
+        setConfigOpen(true);
+      }
+    }
+    if (els.cacheNote && !state.data) {
+      var count = (catalog.boards || []).length;
+      els.cacheNote.textContent =
+        count +
+        " board" +
+        (count === 1 ? "" : "s") +
+        " listed · checklists not loaded yet";
+    }
+    if (els.subtitle && !state.data) {
+      els.subtitle.textContent =
+        "Choose boards, then Load checklists" +
+        (catalog.me && (catalog.me.fullName || catalog.me.username)
+          ? " · " + (catalog.me.fullName || catalog.me.username)
+          : "");
+    }
+  }
+
+  function loadBoardList(options) {
+    var listOpts = options || {};
+    if (state.loading) return Promise.resolve();
+    state.loading = true;
+    syncActionButtons();
+
+    var finish = function () {
+      state.loading = false;
+      state.scanAbort = null;
+      hideScanProgress();
+      syncActionButtons();
+    };
+
+    if (state.scanAbort) {
+      try {
+        state.scanAbort.abort();
+      } catch (e) {
+        // ignore
+      }
+    }
+    state.scanAbort =
+      typeof AbortController !== "undefined" ? new AbortController() : null;
+
+    if (state.demo) {
+      setScanProgress(0, 1, "Board list", "scan");
+      return demoDelay(200)
+        .then(function () {
+          var mock =
+            window.ChecklistHubMock && window.ChecklistHubMock.getDataset
+              ? window.ChecklistHubMock.getDataset()
+              : null;
+          applyBoardCatalog(
+            {
+              me:
+                (mock && mock.me) || {
+                  id: "member-me",
+                  fullName: "Alex Rivera",
+                },
+              boards: (mock && mock.boards) || [],
+              meta: { httpCalls: 0, rateLimitUnits: 0 },
+            },
+            listOpts
+          );
+          setScanProgress(1, 1, "Done", "scan");
+        })
+        .catch(function (err) {
+          if (err && err.name === "AbortError") {
+            showBanner("Cancelled.", "info", { dismissible: true });
+            return;
+          }
+          showErrorBanner(err, "List boards");
+        })
+        .finally(finish);
+    }
+
+    return ensureAuthorized()
+      .then(function (token) {
+        if (!token) return null;
+        state.token = token;
+        if (!isApiKeyConfigured()) {
+          throw new Error(
+            "Set your Power-Up API key in public/config.js before using Checklist Hub. Or open dashboard.html?demo=1 for a local preview."
+          );
+        }
+        els.subtitle.textContent = "Listing boards…";
+        setScanProgress(0, 1, "Names only", "catalog");
+        return api.loadBoardCatalog(state.token, {
+          signal: state.scanAbort ? state.scanAbort.signal : null,
+        });
+      })
+      .then(function (catalog) {
+        if (!catalog) return;
+        applyBoardCatalog(catalog, listOpts);
+        setScanProgress(1, 1, "Done", "catalog");
+        if (listOpts.refreshOnly && state.data) {
+          showBanner(
+            "Board name list refreshed. Checklist data is unchanged until you Load checklists.",
+            "info",
+            { dismissible: true, bannerKind: "board-pick" }
+          );
+        }
+      })
+      .catch(function (err) {
+        if (err && err.name === "AbortError") {
+          showBanner("Cancelled.", "info", { dismissible: true });
+          return;
+        }
+        showErrorBanner(err, "List boards");
+        els.subtitle.textContent = "Could not list boards";
+      })
+      .finally(finish);
+  }
+
+  function boardsMissingFromScan() {
+    if (!state.data) return [];
+    var scanned = {};
+    (state.data.scannedBoardIds || []).forEach(function (id) {
+      scanned[id] = true;
+    });
+    var selected = getAllowlistBoardIds();
+    var missing = [];
+    if (selected === null) {
+      var catalog =
+        (state.boardCatalog && state.boardCatalog.boards) ||
+        state.data.boards ||
+        [];
+      catalog.forEach(function (board) {
+        if (board && board.id && !scanned[board.id]) {
+          missing.push(board.id);
+        }
+      });
+    } else {
+      selected.forEach(function (id) {
+        if (!scanned[id]) missing.push(id);
+      });
+    }
+    return missing;
+  }
+
+  function updateAllowlistRescanNudge() {
+    if (!state.data) {
+      state.allowlistRescanNeeded = false;
+      if (
+        els.banner &&
+        !els.banner.hidden &&
+        els.banner.getAttribute("data-banner-kind") === "allowlist-rescan"
+      ) {
+        showBanner(null);
+      }
+      updateScanNudge();
+      return;
+    }
+    var missing = boardsMissingFromScan();
+    state.allowlistRescanNeeded = missing.length > 0;
+    if (state.allowlistRescanNeeded) {
+      showBanner(
+        "You selected boards that are not in the current checklist data yet. Press Load checklists to pull items from them (this does not refresh the board name list).",
+        "info",
+        { dismissible: true, bannerKind: "allowlist-rescan" }
+      );
+    } else if (
+      els.banner &&
+      !els.banner.hidden &&
+      els.banner.getAttribute("data-banner-kind") === "allowlist-rescan"
+    ) {
+      showBanner(null);
+    }
+    updateScanNudge();
   }
 
   function cancelScan() {
@@ -2065,7 +2296,8 @@
     var pct = total ? Math.round((done / total) * 100) : 0;
     if (els.scanProgressFill) els.scanProgressFill.style.width = pct + "%";
     if (els.scanProgressText) {
-      var verb = mode === "update" ? "Updating" : "Scanning boards";
+      var verb = mode === "update" ? "Updating" : "Loading checklists";
+      if (mode === "catalog") verb = "Listing boards";
       els.scanProgressText.textContent =
         verb +
         " " +
@@ -2099,6 +2331,14 @@
 
   function updateScanNudge() {
     if (!els.scanNudge) return;
+    if (state.allowlistRescanNeeded && state.data) {
+      els.scanNudge.hidden = false;
+      els.scanNudge.title =
+        "Load checklist items from boards you newly selected under Boards to load";
+      els.scanNudge.innerHTML =
+        '<span class="material-symbols-outlined" aria-hidden="true">radar</span> Load checklists for new boards?';
+      return;
+    }
     if (!state.data || !state.data.fetchedAt || state.loading) {
       els.scanNudge.hidden = true;
       return;
@@ -2107,6 +2347,12 @@
     var nudgeAfter = Math.max(ttl, 15 * 60 * 1000);
     var age = Date.now() - state.data.fetchedAt;
     els.scanNudge.hidden = age < nudgeAfter;
+    if (!els.scanNudge.hidden) {
+      els.scanNudge.title =
+        "Load checklists again on Boards to load (find newly assigned work)";
+      els.scanNudge.innerHTML =
+        '<span class="material-symbols-outlined" aria-hidden="true">radar</span> Load checklists for new assignments?';
+    }
   }
 
   function setEmptyCopy(mode) {
@@ -2114,13 +2360,21 @@
     var heading = els.emptyState.querySelector("h2");
     var steps = els.emptyState.querySelector(".empty-steps");
     var note = els.emptyState.querySelector(".empty-note");
-    if (mode === "idle") {
+    if (mode === "pick-boards") {
+      if (heading) heading.textContent = "Choose boards to load";
+      if (steps) steps.hidden = true;
+      if (note) {
+        note.hidden = false;
+        note.textContent =
+          "Tick Boards to load in Filters, then Load checklists. Closing the hub clears checklist data.";
+      }
+    } else if (mode === "idle") {
       if (heading) heading.textContent = "Ready when you are";
       if (steps) steps.hidden = false;
       if (note) {
         note.hidden = false;
         note.textContent =
-          "Closing this hub clears the list. Next time you open it, scan again.";
+          "List boards (names only) → pick Boards to load → Load checklists. Prefer Update status after that.";
       }
     } else {
       if (heading) heading.textContent = "No matching work";
@@ -2135,6 +2389,7 @@
 
   function showIdleWorkspace() {
     state.data = null;
+    state.allowlistRescanNeeded = false;
     state.statusNudgeDismissedUntil = 0;
     stopStatusNudgeWatch();
     if (els.resultCount) els.resultCount.textContent = "";
@@ -2145,7 +2400,7 @@
     hideScanProgress();
     if (els.tableWrap) els.tableWrap.hidden = true;
     if (els.calendarWrap) els.calendarWrap.hidden = true;
-    setEmptyCopy("idle");
+    setEmptyCopy(state.boardsReady ? "pick-boards" : "idle");
     if (els.emptyState) els.emptyState.hidden = false;
     if (els.focusChips) {
       els.focusChips.querySelectorAll("[data-due-chip]").forEach(function (chip) {
@@ -2710,6 +2965,8 @@
             cacheNote:
               "Local mock dataset · boards are member-accessible only · open cards in Trello to complete",
           });
+          state.boardsReady = true;
+          state.allowlistRescanNeeded = false;
           resolve();
         })
         .catch(reject);
@@ -2793,6 +3050,18 @@
             (scanned === 1 ? "" : "s") +
             (failed ? " · " + failed + " with issues" : ""),
         });
+        state.boardsReady = true;
+        state.allowlistRescanNeeded = false;
+        if (
+          els.banner &&
+          !els.banner.hidden &&
+          (els.banner.getAttribute("data-banner-kind") === "allowlist-rescan" ||
+            els.banner.getAttribute("data-banner-kind") === "board-pick")
+        ) {
+          showBanner(null);
+        }
+        updateScanNudge();
+        syncWelcomeTeamsUi();
       })
       .catch(function (err) {
         if (err && err.name === "AbortError") {
@@ -2849,10 +3118,7 @@
     }
 
     fillSelect(els.filterTeam, "None");
-    fillSelect(
-      els.welcomeTeam,
-      "None — pick Scan boards below"
-    );
+    fillSelect(els.welcomeTeam, "None — use List / Load below");
     if (!(current && list.some(function (t) { return t.id === current; }))) {
       state.selectedTeamId = "";
     }
@@ -2865,21 +3131,34 @@
       els.welcomeTeamsBlock.hidden = !hasTeams;
     }
     if (els.welcomeLead) {
-      if (hasTeams) {
+      if (!state.boardsReady) {
+        els.welcomeLead.textContent = hasTeams
+          ? "List boards (cheap), or Load team checklists to jump ahead for one team."
+          : "List boards first (names only), tick Boards to load, then Load checklists.";
+      } else if (hasTeams) {
         els.welcomeLead.textContent =
-          "Pick a team to scan only its boards, or scan your full allowlist. Closing the hub clears the list.";
-      } else if (state.teamsContextNote) {
-        els.welcomeLead.textContent =
-          "Scan your boards to load checklist work. " +
-          state.teamsContextNote +
-          " Closing the hub clears the list.";
+          "Pick a team or tick Boards to load, then Load checklists for those boards only.";
       } else {
         els.welcomeLead.textContent =
-          "Scan the boards you need. Closing the hub clears the list — scan again next time you open it.";
+          "Tick Boards to load in Filters, then Load checklists. Prefer Update status day to day.";
       }
     }
     if (els.welcomeTeam && els.filterTeam) {
       els.welcomeTeam.value = els.filterTeam.value || "";
+    }
+    if (els.welcomeScan) {
+      var scanLabel = els.welcomeScan.querySelector(".btn-label");
+      var scanIcon = els.welcomeScan.querySelector(".material-symbols-outlined");
+      if (!state.boardsReady) {
+        if (scanLabel) scanLabel.textContent = "List boards";
+        if (scanIcon) scanIcon.textContent = "folder_open";
+        els.welcomeScan.title = "Cheap: open board names only";
+      } else {
+        if (scanLabel) scanLabel.textContent = "Load checklists";
+        if (scanIcon) scanIcon.textContent = "radar";
+        els.welcomeScan.title =
+          "Load checklist items from Boards to load (or all if none selected)";
+      }
     }
     updateWelcomeScanTeamButton();
   }
@@ -3406,12 +3685,15 @@
 
   if (els.welcomeScan) {
     els.welcomeScan.addEventListener("click", function () {
-      // Leave team selection; allowlist/cookie decides scope when no team is selected.
       if (els.welcomeTeam) els.welcomeTeam.value = "";
       if (els.filterTeam) els.filterTeam.value = "";
       state.selectedTeamId = "";
       closeWelcomeModal({ skipSession: true });
-      runScan({ skipConfirm: !state.data });
+      if (!state.boardsReady) {
+        loadBoardList();
+        return;
+      }
+      runScan({ skipConfirm: !state.data, forceFull: true });
     });
   }
 
@@ -3425,6 +3707,12 @@
         return;
       }
       applySelectedTeam(teamId).then(function () {
+        // Team boards are enough to mark catalog ready for scanning.
+        if (findTeamById(teamId) && findTeamById(teamId).boardIds && findTeamById(teamId).boardIds.length) {
+          state.boardsReady = true;
+          syncActionButtons();
+          syncWelcomeTeamsUi();
+        }
         updateWelcomeScanTeamButton();
       });
     });
@@ -3440,7 +3728,8 @@
       closeWelcomeModal({ skipSession: true });
       applySelectedTeam(teamId).then(function () {
         if (teamBlocksScan()) return;
-        runScan({ skipConfirm: true });
+        state.boardsReady = true;
+        runScan({ skipConfirm: true, forceFull: true });
       });
     });
   }
@@ -3843,6 +4132,16 @@
     onChange: persistAllowlist,
     onChangeSummary: updateAllowlistSummary,
   });
+
+  var refreshBoardListBtn = document.getElementById("refresh-board-list-btn");
+  if (refreshBoardListBtn) {
+    refreshBoardListBtn.addEventListener("click", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      closeAllMultiSelects();
+      loadBoardList({ silent: true, refreshOnly: true });
+    });
+  }
 
   if (els.exportBtn) {
     els.exportBtn.addEventListener("click", function () {
