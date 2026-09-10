@@ -27,7 +27,7 @@
     filterSummary: document.getElementById("filter-summary"),
     prefsBar: document.getElementById("config-panel"),
     filterWorkType: document.getElementById("filter-work-type"),
-    allowlistBoards: document.getElementById("allowlist-boards"),
+    allowlistBoards: document.getElementById("filter-board"),
     savedViews: document.getElementById("saved-views"),
     saveViewBtn: document.getElementById("save-view-btn"),
     renameViewBtn: document.getElementById("rename-view-btn"),
@@ -325,7 +325,7 @@
         status === 401 || status === 403
           ? "Trello refused access. Try authorizing again."
           : status === 429
-            ? "Trello is rate-limiting requests. Wait a minute and try again."
+            ? "Trello is busy right now. Wait a minute and try again."
             : "Something went wrong talking to Trello. Try again, or share the technical details with an admin.";
       technical = raw;
     } else if (/Failed to fetch|NetworkError|Load failed/i.test(raw)) {
@@ -569,35 +569,6 @@
     });
   }
 
-  function updateAllowlistSummary() {
-    if (!els.allowlistBoards) return;
-    var summary = els.allowlistBoards.querySelector(".multi-select-summary");
-    if (!summary) return;
-    var optionCount = els.allowlistBoards.querySelectorAll(
-      'input[type="checkbox"]'
-    ).length;
-    if (!optionCount) {
-      var saved = prefsApi.loadPrefs().allowlist || [];
-      if (saved.length) {
-        summary.textContent =
-          saved.length +
-          " saved board" +
-          (saved.length === 1 ? "" : "s") +
-          " (names after scan)";
-        return;
-      }
-      summary.textContent = "All accessible boards";
-      return;
-    }
-    var checked = getCheckedValues(els.allowlistBoards);
-    if (!checked.length) {
-      summary.textContent = "All accessible boards";
-      return;
-    }
-    summary.textContent =
-      checked.length + " board" + (checked.length === 1 ? "" : "s");
-  }
-
   function addOption(container, value, label, checked) {
     var row = document.createElement("label");
     row.className = "multi-option";
@@ -613,57 +584,97 @@
     container.appendChild(row);
   }
 
-  function getAllowlistBoardIds() {
+  function updateAllowlistSummary() {
+    if (!els.filterBoard) return;
+    var summary = els.filterBoard.querySelector(".multi-select-summary");
+    if (!summary) return;
+    var optionCount = els.filterBoard.querySelectorAll(
+      'input[type="checkbox"]'
+    ).length;
+    if (!optionCount) {
+      var saved = prefsApi.loadPrefs().allowlist || [];
+      if (saved.length) {
+        summary.textContent =
+          saved.length +
+          " saved board" +
+          (saved.length === 1 ? "" : "s") +
+          " (list names to show them)";
+        return;
+      }
+      summary.textContent = state.boardsReady
+        ? "No boards selected"
+        : "Listing boards…";
+      return;
+    }
+    var checked = getCheckedValues(els.filterBoard);
+    if (!checked.length) {
+      summary.textContent = "No boards selected";
+      return;
+    }
+    if (checked.length === optionCount) {
+      summary.textContent = "All " + optionCount + " boards";
+      return;
+    }
+    summary.textContent =
+      checked.length + " board" + (checked.length === 1 ? "" : "s");
+  }
+
+  function getSelectedBoardIds() {
     if (state.selectedTeamId) {
       var team = findTeamById(state.selectedTeamId);
       if (team && team.boardIds && team.boardIds.length) {
+        // Prefer live checkbox state when options exist.
+        if (
+          els.filterBoard &&
+          els.filterBoard.querySelectorAll('input[type="checkbox"]').length
+        ) {
+          return getCheckedValues(els.filterBoard);
+        }
         return team.boardIds.slice();
       }
       return [];
     }
-    if (els.allowlistBoards) {
-      var optionCount = els.allowlistBoards.querySelectorAll(
+    if (els.filterBoard) {
+      var optionCount = els.filterBoard.querySelectorAll(
         'input[type="checkbox"]'
       ).length;
       if (optionCount) {
-        var checked = getCheckedValues(els.allowlistBoards);
-        return checked.length ? checked : null;
+        return getCheckedValues(els.filterBoard);
       }
     }
     var saved = prefsApi.loadPrefs().allowlist || [];
-    return saved.length ? saved : null;
+    return saved.slice();
+  }
+
+  function getAllowlistBoardIds() {
+    // Load scope = currently selected boards (never "all if empty").
+    var ids = getSelectedBoardIds();
+    return ids;
   }
 
   function persistAllowlist() {
-    var ids = getCheckedValues(els.allowlistBoards);
+    var ids = getCheckedValues(els.filterBoard);
     savePrefs({ allowlist: ids });
     updateAllowlistSummary();
     updateAllowlistRescanNudge();
   }
 
-  function populateAllowlistBoards(boards) {
-    if (!els.allowlistBoards) return;
-    var container = document.getElementById("allowlist-board-options");
-    if (!container) return;
-    var allowlist = prefsApi.loadPrefs().allowlist || [];
-    container.innerHTML = "";
-    boards
-      .slice()
-      .sort(function (a, b) {
-        return a.name.localeCompare(b.name);
-      })
-      .forEach(function (board) {
-        var checked = allowlist.indexOf(board.id) >= 0;
-        addOption(container, board.id, board.name, checked);
-      });
-    updateAllowlistSummary();
-  }
-
-  function populateBoards(boards) {
+  function populateBoardOptions(boards) {
+    if (!els.filterBoard) return;
     var container = document.getElementById("filter-board-options");
+    if (!container) return;
     var previous = getCheckedValues(els.filterBoard);
     var hadOptions =
       els.filterBoard.querySelectorAll('input[type="checkbox"]').length > 0;
+    var allowlist = prefsApi.loadPrefs().allowlist || [];
+    var prefer =
+      hadOptions && previous.length
+        ? previous
+        : state.selectedTeamId &&
+            findTeamById(state.selectedTeamId) &&
+            findTeamById(state.selectedTeamId).boardIds
+          ? findTeamById(state.selectedTeamId).boardIds
+          : allowlist;
     container.innerHTML = "";
     boards
       .slice()
@@ -671,10 +682,48 @@
         return a.name.localeCompare(b.name);
       })
       .forEach(function (board) {
-        var checked = !hadOptions || previous.indexOf(board.id) >= 0;
+        var checked = prefer.indexOf(board.id) >= 0;
         addOption(container, board.id, board.name, checked);
       });
-    updateMultiSummary(els.filterBoard, "All boards", "All boards");
+    updateAllowlistSummary();
+    updateAllowlistRescanNudge();
+  }
+
+  function populateAllowlistBoards(boards) {
+    populateBoardOptions(boards);
+  }
+
+  function populateBoards(boards) {
+    // Single Boards control — keep in sync after checklist load.
+    populateBoardOptions(
+      (state.boardCatalog && state.boardCatalog.boards) || boards || []
+    );
+  }
+
+  function applyAllowlistBoardIds(boardIds) {
+    if (!els.filterBoard) return;
+    var container = document.getElementById("filter-board-options");
+    var ids = boardIds || [];
+    if (container) {
+      var existing = {};
+      container.querySelectorAll('input[type="checkbox"]').forEach(function (input) {
+        existing[input.value] = true;
+        input.checked = ids.indexOf(input.value) >= 0;
+      });
+      ids.forEach(function (id) {
+        if (existing[id]) return;
+        var name = id;
+        var team = findTeamById(state.selectedTeamId);
+        if (team && team.resolvedBoards) {
+          team.resolvedBoards.forEach(function (b) {
+            if (b.id === id) name = b.name || id;
+          });
+        }
+        addOption(container, id, name, true);
+      });
+    }
+    persistAllowlist();
+    if (state.data) renderTable();
   }
 
   function populateLabels(labels) {
@@ -793,6 +842,9 @@
     var due = els.filterDue.value;
     var q = (els.filterSearch.value || "").trim().toLowerCase();
     var rowState = itemState(item);
+    var boardOptionCount = els.filterBoard
+      ? els.filterBoard.querySelectorAll('input[type="checkbox"]').length
+      : 0;
 
     if (!people.length) {
       // Anyone: assigned work only — no org-wide unassigned dump.
@@ -809,10 +861,14 @@
       if (!ok) return false;
     }
 
+    // Ticked boards = visible. Empty selection = show nothing.
+    if (boardOptionCount) {
+      if (!boards.length) return false;
+      if (boards.indexOf(item.boardId) === -1) return false;
+    }
+
     if (status === "incomplete" && rowState !== "incomplete") return false;
     if (status === "complete" && rowState !== "complete") return false;
-
-    if (boards.length && boards.indexOf(item.boardId) === -1) return false;
 
     var labels = els.filterLabel ? getCheckedValues(els.filterLabel) : [];
     if (labels.length) {
@@ -1824,7 +1880,8 @@
     if (els.filterLabel) setCheckedValues(els.filterLabel, view.labels || []);
     if (els.filterList) setCheckedValues(els.filterList, view.lists || []);
     updateAssigneeSummary();
-    updateMultiSummary(els.filterBoard, "All boards", "All boards");
+    updateAllowlistSummary();
+    persistAllowlist();
     if (els.filterLabel) {
       updateMultiSummary(els.filterLabel, "All labels", "All labels");
     }
@@ -1899,8 +1956,11 @@
     var boardBoxes = els.filterBoard
       ? els.filterBoard.querySelectorAll('input[type="checkbox"]').length
       : 0;
-    if (boards.length && boards.length < boardBoxes) {
-      bits.push("Show " + boards.length + " boards");
+    if (boardBoxes) {
+      if (!boards.length) bits.push("No boards shown");
+      else if (boards.length < boardBoxes) {
+        bits.push(boards.length + " boards");
+      }
     }
     if (els.filterLabel) {
       var labelIds = getCheckedValues(els.filterLabel);
@@ -1912,9 +1972,6 @@
     }
     var q = (els.filterSearch.value || "").trim();
     if (q) bits.push('“' + q.slice(0, 18) + (q.length > 18 ? "…" : "") + '”');
-
-    var allow = getAllowlistBoardIds();
-    if (allow && allow.length) bits.push("Load " + allow.length);
 
     els.filterSummary.textContent = bits.join(" · ");
   }
@@ -1966,12 +2023,12 @@
         if (label) label.textContent = "List boards";
         if (icon) icon.textContent = "folder_open";
         els.refreshBtn.title =
-          "Cheap step: load open board names only (no checklist items yet)";
+          "Gets board names only — no checklist items yet";
       } else {
         if (label) label.textContent = "Load checklists";
         if (icon) icon.textContent = "radar";
         els.refreshBtn.title =
-          "Load checklist items from Boards to load (or all if none selected)";
+          "Load checklist items from the boards ticked under Filters → Boards";
       }
     }
 
@@ -2028,7 +2085,7 @@
     if (!state.boardsReady) {
       return loadBoardList().then(function () {
         showBanner(
-          "Board list ready. Tick Boards to load in Filters, then Load checklists.",
+          "Board list ready. Tick boards under Filters → Boards, then Load checklists.",
           "info",
           { dismissible: true, bannerKind: "board-pick" }
         );
@@ -2039,10 +2096,19 @@
       showBanner(
         "Team “" +
           ((team && team.name) || "selected") +
-          "” has no boards to scan. Add board shortLinks to the team checklist, or choose None.",
+          "” has no boards set up. Ask an admin to add board links on the team checklist, or choose None.",
         "info",
         { dismissible: true }
       );
+      return Promise.resolve();
+    }
+    if (!getAllowlistBoardIds().length) {
+      showBanner(
+        "Select at least one board under Filters → Boards, then Load checklists.",
+        "info",
+        { dismissible: true, bannerKind: "board-pick" }
+      );
+      setConfigOpen(true);
       return Promise.resolve();
     }
     if (state.scanAbort) {
@@ -2067,12 +2133,6 @@
       state.catalogMe = catalog.me;
     }
     populateAllowlistBoards((catalog && catalog.boards) || []);
-    if (state.selectedTeamId) {
-      var team = findTeamById(state.selectedTeamId);
-      if (team && team.boardIds && team.boardIds.length) {
-        applyAllowlistBoardIds(team.boardIds);
-      }
-    }
     updateAllowlistSummary();
     syncActionButtons();
     syncWelcomeTeamsUi();
@@ -2081,7 +2141,7 @@
       if (els.emptyState) els.emptyState.hidden = false;
       if (!opts.silent) {
         showBanner(
-          "Tick boards under Filters → Boards to load, then press Load checklists.",
+          "Tick boards under Filters → Boards, then press Load checklists.",
           "info",
           { dismissible: true, bannerKind: "board-pick" }
         );
@@ -2129,7 +2189,7 @@
       typeof AbortController !== "undefined" ? new AbortController() : null;
 
     if (state.demo) {
-      setScanProgress(0, 1, "Board list", "scan");
+      setScanProgress(0, 1, "Board names", "catalog");
       return demoDelay(200)
         .then(function () {
           var mock =
@@ -2148,7 +2208,7 @@
             },
             listOpts
           );
-          setScanProgress(1, 1, "Done", "scan");
+          setScanProgress(1, 1, "Done", "catalog");
         })
         .catch(function (err) {
           if (err && err.name === "AbortError") {
@@ -2170,7 +2230,7 @@
           );
         }
         els.subtitle.textContent = "Listing boards…";
-        setScanProgress(0, 1, "Names only", "catalog");
+        setScanProgress(0, 1, "Board names", "catalog");
         return api.loadBoardCatalog(state.token, {
           signal: state.scanAbort ? state.scanAbort.signal : null,
         });
@@ -2204,23 +2264,10 @@
     (state.data.scannedBoardIds || []).forEach(function (id) {
       scanned[id] = true;
     });
-    var selected = getAllowlistBoardIds();
     var missing = [];
-    if (selected === null) {
-      var catalog =
-        (state.boardCatalog && state.boardCatalog.boards) ||
-        state.data.boards ||
-        [];
-      catalog.forEach(function (board) {
-        if (board && board.id && !scanned[board.id]) {
-          missing.push(board.id);
-        }
-      });
-    } else {
-      selected.forEach(function (id) {
-        if (!scanned[id]) missing.push(id);
-      });
-    }
+    getAllowlistBoardIds().forEach(function (id) {
+      if (!scanned[id]) missing.push(id);
+    });
     return missing;
   }
 
@@ -2241,7 +2288,7 @@
     state.allowlistRescanNeeded = missing.length > 0;
     if (state.allowlistRescanNeeded) {
       showBanner(
-        "You selected boards that are not in the current checklist data yet. Press Load checklists to pull items from them (this does not refresh the board name list).",
+        "You ticked boards that are not in this list yet. Press Load checklists to pull their items (this does not refresh board names).",
         "info",
         { dismissible: true, bannerKind: "allowlist-rescan" }
       );
@@ -2272,7 +2319,7 @@
   function demoDelay(ms) {
     return new Promise(function (resolve, reject) {
       if (state.scanAbort && state.scanAbort.signal.aborted) {
-        var early = new Error("Scan cancelled.");
+        var early = new Error("Cancelled.");
         early.name = "AbortError";
         reject(early);
         return;
@@ -2280,7 +2327,7 @@
       state.demoTimer = setTimeout(function () {
         state.demoTimer = null;
         if (state.scanAbort && state.scanAbort.signal.aborted) {
-          var err = new Error("Scan cancelled.");
+          var err = new Error("Cancelled.");
           err.name = "AbortError";
           reject(err);
           return;
@@ -2334,7 +2381,7 @@
     if (state.allowlistRescanNeeded && state.data) {
       els.scanNudge.hidden = false;
       els.scanNudge.title =
-        "Load checklist items from boards you newly selected under Boards to load";
+        "Load checklist items from boards you newly selected under Boards";
       els.scanNudge.innerHTML =
         '<span class="material-symbols-outlined" aria-hidden="true">radar</span> Load checklists for new boards?';
       return;
@@ -2349,7 +2396,7 @@
     els.scanNudge.hidden = age < nudgeAfter;
     if (!els.scanNudge.hidden) {
       els.scanNudge.title =
-        "Load checklists again on Boards to load (find newly assigned work)";
+        "Load checklists again for selected boards (find newly assigned work)";
       els.scanNudge.innerHTML =
         '<span class="material-symbols-outlined" aria-hidden="true">radar</span> Load checklists for new assignments?';
     }
@@ -2366,7 +2413,7 @@
       if (note) {
         note.hidden = false;
         note.textContent =
-          "Tick Boards to load in Filters, then Load checklists. Closing the hub clears checklist data.";
+          "Tick boards under Filters → Boards, then Load checklists. Closing the hub clears checklist data.";
       }
     } else if (mode === "idle") {
       if (heading) heading.textContent = "Ready when you are";
@@ -2374,7 +2421,7 @@
       if (note) {
         note.hidden = false;
         note.textContent =
-          "List boards (names only) → pick Boards to load → Load checklists. Prefer Update status after that.";
+          "Boards are listed when you open the hub. Tick the ones you need, then Load checklists. Day to day, prefer Update status.";
       }
     } else {
       if (heading) heading.textContent = "No matching work";
@@ -2382,7 +2429,7 @@
       if (note) {
         note.hidden = false;
         note.textContent =
-          "Try My day, widen filters, open Undated, or scan boards again.";
+          "Try My day, widen filters, open Undated, or Load checklists again.";
       }
     }
   }
@@ -2651,7 +2698,7 @@
           if (els.calendarWrap) els.calendarWrap.hidden = true;
           els.emptyState.hidden = true;
           showBanner(
-            "Step 1 of 3: authorize with Trello (read-only). Then Scan boards to load your work.",
+            "Authorize once with Trello (read-only). Boards list next — tick what you need, then Load checklists.",
             "info"
           );
           return null;
@@ -2682,7 +2729,7 @@
     els.cacheNote.textContent = opts.cacheNote || "";
     if (data.fetchedAt && !opts.skipLastScanned) {
       var scannedLabel =
-        "Last scan " + formatAgo(data.fetchedAt);
+        "Last loaded " + formatAgo(data.fetchedAt);
       els.cacheNote.textContent = els.cacheNote.textContent
         ? scannedLabel + " · " + els.cacheNote.textContent
         : scannedLabel;
@@ -2702,11 +2749,11 @@
       var moreFails =
         failCount > 4 ? " +" + (failCount - 4) + " more" : "";
       showBanner(
-        "Scan finished with " +
+        "Loaded " +
           okCount +
           " board" +
           (okCount === 1 ? "" : "s") +
-          " ok and " +
+          " with " +
           failCount +
           " issue" +
           (failCount === 1 ? "" : "s") +
@@ -2730,20 +2777,7 @@
         }
       );
     }
-    if (data.meta && !state.demo && !opts.skipMetaAppend) {
-      var parts = [];
-      if (data.meta.httpCalls != null) {
-        parts.push(data.meta.httpCalls + " HTTP calls");
-      }
-      if (data.meta.rateLimitUnits != null) {
-        parts.push("~" + data.meta.rateLimitUnits + " rate-limit units");
-      }
-      if (parts.length) {
-        els.cacheNote.textContent =
-          (els.cacheNote.textContent ? els.cacheNote.textContent + " · " : "") +
-          parts.join(" · ");
-      }
-    }
+    // Rate / HTTP detail stays in Request activity modal — not the main cache note.
     if (!opts.keepSubtitle) {
       els.subtitle.textContent =
         opts.subtitle ||
@@ -2786,9 +2820,9 @@
     });
     state.data.statusSyncedAt = Date.now();
     els.cacheNote.textContent =
-      "Status sync · " +
+      "Status updated · " +
       changed +
-      " item(s) updated locally (demo) · no board scan";
+      " item(s) changed locally (demo)";
     renderTable();
     return Promise.resolve();
   }
@@ -2798,7 +2832,7 @@
     if (!state.data) {
       if (!silent) {
         showBanner(
-          "Scan boards first to load items. Update status then refreshes what you already have.",
+          "Load checklists first. Update status then refreshes what you already have.",
           "info",
           { dismissible: true }
         );
@@ -2891,26 +2925,15 @@
       .then(function (result) {
         if (!result) return;
         var meta = result.meta || {};
-        var note =
-          "Status sync · ~" +
-          (meta.rateLimitUnits != null ? meta.rateLimitUnits : "?") +
-          " rate units · " +
-          (meta.httpCalls || 0) +
-          " HTTP" +
-          (meta.strategy ? " · " + meta.strategy : "");
+        var note = "Status updated";
         if (meta.updated != null) {
           note =
-            "Status sync · checked " +
+            "Status updated · checked " +
             (meta.checked || 0) +
-            " · updated " +
+            " · changed " +
             (meta.updated || 0) +
             (meta.added ? " · +" + meta.added : "") +
-            (meta.removed ? " · −" + meta.removed : "") +
-            " · " +
-            (meta.httpCalls || 0) +
-            " HTTP · ~" +
-            (meta.rateLimitUnits != null ? meta.rateLimitUnits : "?") +
-            " rate units";
+            (meta.removed ? " · −" + meta.removed : "");
         }
 
         applyDataset(result.data, {
@@ -2921,7 +2944,7 @@
 
         if (!silent) {
           showBanner(
-            "Refreshed status for items already in the list. Scan boards to pick up brand-new assignments.",
+            "Updated statuses for items already in this list. Load checklists to pick up brand-new work.",
             "info",
             { dismissible: true }
           );
@@ -2996,10 +3019,10 @@
         })
         .catch(function (err) {
           if (err && err.name === "AbortError") {
-            showBanner("Scan cancelled.", "info", { dismissible: true });
+            showBanner("Cancelled.", "info", { dismissible: true });
             els.subtitle.textContent = state.data
               ? "Demo user · Alex Rivera"
-              : "Authorized · press Scan boards to load work";
+              : "Authorized · tick boards, then Load checklists";
             return;
           }
           throw err;
@@ -3018,7 +3041,7 @@
           );
         }
 
-        els.subtitle.textContent = "Scanning boards…";
+        els.subtitle.textContent = "Loading checklists…";
         setScanProgress(0, 1, "Starting…");
 
         return api.getChecklistData(state.token, {
@@ -3027,7 +3050,7 @@
           signal: state.scanAbort ? state.scanAbort.signal : null,
           onProgress: function (done, total, boardName) {
             els.subtitle.textContent =
-              "Scanning boards " + done + "/" + total + " · " + boardName;
+              "Loading checklists " + done + "/" + total + " · " + boardName;
             setScanProgress(done, total, boardName);
           },
         });
@@ -3044,7 +3067,7 @@
           0;
         applyDataset(result.data, {
           cacheNote:
-            "Synced across " +
+            "Loaded from " +
             scanned +
             " board" +
             (scanned === 1 ? "" : "s") +
@@ -3065,16 +3088,16 @@
       })
       .catch(function (err) {
         if (err && err.name === "AbortError") {
-          showBanner("Scan cancelled.", "info", { dismissible: true });
+          showBanner("Cancelled.", "info", { dismissible: true });
           els.subtitle.textContent = state.data
             ? "Signed in as " +
               ((state.data.me &&
                 (state.data.me.fullName || state.data.me.username)) ||
                 "member")
-            : "Authorized · press Scan boards to load work";
+            : "Authorized · tick boards, then Load checklists";
           return;
         }
-        showErrorBanner(err, "Scan boards / load data");
+        showErrorBanner(err, "Load checklists");
         els.subtitle.textContent = "Something went wrong";
       })
       .finally(finish);
@@ -3118,7 +3141,7 @@
     }
 
     fillSelect(els.filterTeam, "None");
-    fillSelect(els.welcomeTeam, "None — use List / Load below");
+    fillSelect(els.welcomeTeam, "None — pick boards yourself");
     if (!(current && list.some(function (t) { return t.id === current; }))) {
       state.selectedTeamId = "";
     }
@@ -3133,14 +3156,14 @@
     if (els.welcomeLead) {
       if (!state.boardsReady) {
         els.welcomeLead.textContent = hasTeams
-          ? "List boards (cheap), or Load team checklists to jump ahead for one team."
-          : "List boards first (names only), tick Boards to load, then Load checklists.";
+          ? "Listing boards… or Load team checklists once a team is selected."
+          : "Listing available boards… then tick Boards and Load checklists.";
       } else if (hasTeams) {
         els.welcomeLead.textContent =
-          "Pick a team or tick Boards to load, then Load checklists for those boards only.";
+          "Pick a team (preselects boards) or tick Boards yourself, then Load checklists.";
       } else {
         els.welcomeLead.textContent =
-          "Tick Boards to load in Filters, then Load checklists. Prefer Update status day to day.";
+          "Tick boards under Filters → Boards, then Load checklists. Day to day, prefer Update status.";
       }
     }
     if (els.welcomeTeam && els.filterTeam) {
@@ -3152,12 +3175,12 @@
       if (!state.boardsReady) {
         if (scanLabel) scanLabel.textContent = "List boards";
         if (scanIcon) scanIcon.textContent = "folder_open";
-        els.welcomeScan.title = "Cheap: open board names only";
+        els.welcomeScan.title = "Gets board names only — no checklist items yet";
       } else {
         if (scanLabel) scanLabel.textContent = "Load checklists";
         if (scanIcon) scanIcon.textContent = "radar";
         els.welcomeScan.title =
-          "Load checklist items from Boards to load (or all if none selected)";
+          "Load checklist items from the boards ticked under Filters → Boards";
       }
     }
     updateWelcomeScanTeamButton();
@@ -3211,31 +3234,6 @@
     updateAssigneeVisibilityBanner();
   }
 
-  function applyAllowlistBoardIds(boardIds) {
-    if (!els.allowlistBoards) return;
-    var container = document.getElementById("allowlist-board-options");
-    var ids = boardIds || [];
-    if (container) {
-      var existing = {};
-      container.querySelectorAll('input[type="checkbox"]').forEach(function (input) {
-        existing[input.value] = true;
-        input.checked = ids.indexOf(input.value) >= 0;
-      });
-      ids.forEach(function (id) {
-        if (existing[id]) return;
-        var team = findTeamById(state.selectedTeamId);
-        var name = id;
-        if (team && team.resolvedBoards) {
-          team.resolvedBoards.forEach(function (b) {
-            if (b.id === id) name = b.name || id;
-          });
-        }
-        addOption(container, id, name, true);
-      });
-    }
-    persistAllowlist();
-  }
-
   function applySelectedTeam(teamId) {
     state.selectedTeamId = teamId || "";
     if (!teamId) {
@@ -3282,7 +3280,7 @@
           showBanner(
             "Team “" +
               team.name +
-              "” has no resolvable board shortLinks. Add shortLinks to the team checklist before Scan.",
+              "” has no boards set up. Ask an admin to add board links on the team checklist, or choose None.",
             "info",
             { dismissible: true }
           );
@@ -3399,7 +3397,7 @@
         (stats.totalCalls === 1 ? "" : "s") +
         " · <strong>" +
         stats.totalUnits +
-        "</strong> rate-limit unit" +
+        "</strong> request unit" +
         (stats.totalUnits === 1 ? "" : "s") +
         " · peak <strong>" +
         stats.peak +
@@ -3410,7 +3408,7 @@
     if (els.apiUsageBuckets) {
       if (!stats.buckets.length) {
         els.apiUsageBuckets.innerHTML =
-          "<p class=\"field-hint\">No API calls logged yet in this session.</p>";
+          "<p class=\"field-hint\">No requests logged yet in this session.</p>";
       } else {
         var html =
           '<table class="api-usage-table"><thead><tr><th>10s window</th><th>Units</th><th>Calls</th></tr></thead><tbody>';
@@ -3479,6 +3477,7 @@
         }
         showIdleWorkspace();
         showWelcomeModal();
+        return loadBoardList({ silent: true });
       });
     }
 
@@ -3487,7 +3486,7 @@
         if (!token) return null;
         state.token = token;
         els.subtitle.textContent =
-          "Authorized · Step 2: Scan boards to load work";
+          "Authorized · Listing boards…";
         return loadTeamsFromContext();
       })
       .then(function (loaded) {
@@ -3498,6 +3497,7 @@
         }
         showIdleWorkspace();
         showWelcomeModal();
+        return loadBoardList({ silent: true });
       });
   }
 
@@ -3565,9 +3565,10 @@
         return loadTeamsFromContext().then(function () {
           els.subtitle.textContent = state.teamsContextNote
             ? "Authorized · " + state.teamsContextNote
-            : "Authorized · Step 2: Scan boards to load work";
+            : "Authorized · Listing boards…";
           showIdleWorkspace();
           showWelcomeModal(true);
+          return loadBoardList({ silent: true });
         });
       })
       .catch(function (err) {
@@ -3707,12 +3708,6 @@
         return;
       }
       applySelectedTeam(teamId).then(function () {
-        // Team boards are enough to mark catalog ready for scanning.
-        if (findTeamById(teamId) && findTeamById(teamId).boardIds && findTeamById(teamId).boardIds.length) {
-          state.boardsReady = true;
-          syncActionButtons();
-          syncWelcomeTeamsUi();
-        }
         updateWelcomeScanTeamButton();
       });
     });
@@ -3728,8 +3723,13 @@
       closeWelcomeModal({ skipSession: true });
       applySelectedTeam(teamId).then(function () {
         if (teamBlocksScan()) return;
-        state.boardsReady = true;
-        runScan({ skipConfirm: true, forceFull: true });
+        var go = function () {
+          runScan({ skipConfirm: true, forceFull: true });
+        };
+        if (!state.boardsReady) {
+          return loadBoardList({ silent: true }).then(go);
+        }
+        go();
       });
     });
   }
@@ -3981,7 +3981,7 @@
       populateSavedViews();
       els.savedViews.value = id;
       showBanner(
-        "That view will apply after your next Scan when you open Checklist Hub.",
+        "That view will apply after you load checklists next time you open Checklist Hub.",
         "info",
         { dismissible: true }
       );
@@ -4113,9 +4113,8 @@
     },
   });
   wireMultiSelect(els.filterBoard, {
-    onChangeSummary: function () {
-      updateMultiSummary(els.filterBoard, "All boards", "All boards");
-    },
+    onChange: persistAllowlist,
+    onChangeSummary: updateAllowlistSummary,
   });
   wireMultiSelect(els.filterLabel, {
     onChangeSummary: function () {
@@ -4126,11 +4125,6 @@
     onChangeSummary: function () {
       updateMultiSummary(els.filterList, "All lists", "All lists");
     },
-  });
-  wireMultiSelect(els.allowlistBoards, {
-    skipRender: true,
-    onChange: persistAllowlist,
-    onChangeSummary: updateAllowlistSummary,
   });
 
   var refreshBoardListBtn = document.getElementById("refresh-board-list-btn");

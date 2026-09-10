@@ -432,7 +432,7 @@ h2 {
   grid-column: span 3;
 }
 
-/* Team + Assignees + Show boards + Scan boards + Labels + Lists */
+/* Team + Assignees + Boards + Labels + Lists (+ Saved) */
 .config-panel .field:nth-child(6),
 .config-panel .field:nth-child(7),
 .config-panel .field:nth-child(8),

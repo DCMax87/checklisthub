@@ -7,7 +7,7 @@
 
   /**
    * Ephemeral in-memory only while this page/modal is open.
-   * Cleared on Scan and when the tab closes — never sessionStorage/localStorage.
+   * Cleared on Load checklists and when the tab closes — never sessionStorage/localStorage.
    */
   let memoryCache = null;
   const TEAM_CHECKLIST_RE = /^Checklist Hub Team:\s*(.+)$/i;
@@ -92,7 +92,7 @@
           (networkErr.name === "AbortError" ||
             (opts.signal && opts.signal.aborted))
         ) {
-          const abortErr = new Error("Scan cancelled.");
+          const abortErr = new Error("Cancelled.");
           abortErr.name = "AbortError";
           abortErr.technical = "Aborted: " + method + " " + path;
           throw abortErr;
@@ -130,7 +130,7 @@
         attempt += 1;
         if (attempt > 5) {
           const err = new Error(
-            "Trello is rate-limiting requests right now. Wait a minute, then try Update status or Scan again."
+            "Trello is busy right now. Wait a minute, then try Update status or Load checklists again."
           );
           err.name = "TrelloRateLimitError";
           err.status = 429;
@@ -169,7 +169,7 @@
           response.status === 401 || response.status === 403
             ? "Trello refused access. Re-authorize Checklist Hub, or ask an admin to confirm the Power-Up and your board permissions."
             : response.status === 404
-              ? "Trello could not find a board or card that was requested. Try Scan boards again; it may have been closed or removed."
+              ? "Trello could not find a board or card that was requested. Try Load checklists again; it may have been closed or removed."
               : response.status >= 500
                 ? "Trello had a server problem. Wait a moment and try again."
                 : "Something went wrong talking to Trello. Try again, or share the technical details with an admin.";
@@ -609,7 +609,7 @@
 
   function assertNotAborted(signal) {
     if (signal && signal.aborted) {
-      const err = new Error("Scan cancelled.");
+      const err = new Error("Cancelled.");
       err.name = "AbortError";
       throw err;
     }

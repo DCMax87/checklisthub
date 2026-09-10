@@ -65,7 +65,7 @@
           class="btn btn-primary"
           disabled
           hidden
-          title="Scan allowlisted boards (or all accessible boards)"
+          title="Load checklist items from selected boards"
         >
           <span class="material-symbols-outlined" aria-hidden="true">folder_open</span>
           <span class="btn-label">List boards</span>
@@ -101,7 +101,7 @@
                 Load checklists
               </span>
               <span class="split-action-item-desc">
-                Pull items from Boards to load (not just refresh names)
+                Pull items from the boards ticked under Filters → Boards
               </span>
             </button>
           </div>
@@ -135,10 +135,10 @@
             id="scan-nudge"
             class="scan-nudge"
             hidden
-            title="Scan to pick up newly assigned work"
+            title="Load checklists to pick up newly assigned work"
           >
             <span class="material-symbols-outlined" aria-hidden="true">radar</span>
-            Scan for new assignments?
+            Load checklists for new assignments?
           </button>
           <button
             type="button"
@@ -241,7 +241,7 @@
             <p id="filter-team-hint" class="field-hint">
               Teams come from checklists named
               <code>Checklist Hub Team: …</code> on the board you opened from.
-              Choosing a team sets Assignees and Boards to load.
+              Choosing a team sets Assignees and preselects Boards.
               Group by Assignee to list Unassigned last.
             </p>
           </div>
@@ -292,7 +292,7 @@
           </div>
           <div class="field">
             <div class="field-label-block">
-              <span class="field-label" id="filter-board-label">Boards shown</span>
+              <span class="field-label" id="filter-board-label">Boards</span>
             </div>
             <div
               class="multi-select"
@@ -308,44 +308,10 @@
                 aria-labelledby="filter-board-label filter-board-summary"
               >
                 <span class="multi-select-summary" id="filter-board-summary"
-                  >All boards</span
+                  >No boards selected</span
                 >
               </button>
               <div class="multi-select-panel" id="filter-board-panel" hidden>
-                <div class="multi-select-actions">
-                  <button type="button" data-action="all">Select all</button>
-                  <button type="button" data-action="clear">Clear</button>
-                </div>
-                <div id="filter-board-options" class="multi-options"></div>
-              </div>
-            </div>
-          </div>
-          <div class="field">
-            <div class="field-label-block">
-              <span class="field-label" id="allowlist-boards-label">Boards to load</span>
-            </div>
-            <div
-              class="multi-select"
-              id="allowlist-boards"
-              data-filter="allowlist"
-            >
-              <button
-                type="button"
-                class="multi-select-toggle"
-                id="allowlist-boards-toggle"
-                aria-expanded="false"
-                aria-controls="allowlist-boards-panel"
-                aria-labelledby="allowlist-boards-label allowlist-boards-summary"
-              >
-                <span class="multi-select-summary" id="allowlist-boards-summary"
-                  >All accessible boards</span
-                >
-              </button>
-              <div
-                class="multi-select-panel"
-                id="allowlist-boards-panel"
-                hidden
-              >
                 <div class="multi-select-actions">
                   <button type="button" data-action="all">Select all</button>
                   <button type="button" data-action="clear">Clear</button>
@@ -353,14 +319,14 @@
                     Refresh list
                   </button>
                 </div>
-                <div id="allowlist-board-options" class="multi-options"></div>
+                <div id="filter-board-options" class="multi-options"></div>
               </div>
             </div>
             <p class="field-hint">
-              <strong>List boards</strong> fills names only (cheap).
-              <strong>Load checklists</strong> pulls items from the boards you
-              tick here. Ticking a new board later needs Load checklists again —
-              Refresh list only updates names.
+              Listed automatically when you open the hub. Ticked boards are
+              shown after you <strong>Load checklists</strong>. Untick to hide.
+              Tick a board that has not been loaded yet and you will be asked to
+              Load checklists again.
             </p>
           </div>
           <div class="field">
@@ -452,7 +418,7 @@
             Preferences use cookies only. Trello data stays in memory while this
             hub is open.
             <button type="button" id="welcome-help-btn" class="linkish">
-              About Scan / Update
+              About List, Load &amp; Update
             </button>
           </p>
         </div>
@@ -514,7 +480,7 @@
         <div class="scan-progress-track" aria-hidden="true">
           <div id="scan-progress-fill" class="scan-progress-fill"></div>
         </div>
-        <p id="scan-progress-text" class="scan-progress-text">Scanning…</p>
+        <p id="scan-progress-text" class="scan-progress-text">Working…</p>
         <button type="button" id="scan-cancel-btn" class="btn btn-ghost">
           <span class="material-symbols-outlined" aria-hidden="true">close</span>
           <span class="btn-label">Cancel</span>
@@ -528,9 +494,8 @@
         role="status"
       >
         <p class="status-refresh-text">
-          Item statuses may be out of date. Update refreshes the open/complete
-          state of items already in this list. Scan boards to find brand-new
-          assignments.
+          Item statuses may be out of date. Update status refreshes open/complete
+          for items already here. Load checklists again to find brand-new work.
         </p>
         <div class="status-refresh-actions">
           <button type="button" id="status-refresh-dismiss" class="btn btn-ghost">
@@ -552,17 +517,17 @@
               <strong>Authorize</strong> once (read-only).
             </li>
             <li>
-              <strong>List boards</strong>, tick the ones you need under Boards
-              to load.
+              Boards list automatically. <strong>Tick</strong> the ones you need
+              (a team preselects them).
             </li>
             <li>
-              <strong>Load checklists</strong> for those boards only — then open
+              <strong>Load checklists</strong> for those boards — then open
               cards in Trello to finish work.
             </li>
           </ol>
           <p class="empty-note">
             Closing the hub clears checklist data. Board picks can stay in a
-            cookie; list boards again only if names are out of date.
+            cookie; use Refresh list only if names are out of date.
           </p>
         </section>
         <div class="table-wrap" id="table-wrap" hidden>
@@ -621,7 +586,7 @@
       </button>
       <span class="footer-sep" aria-hidden="true">·</span>
       <button type="button" id="api-usage-open-btn" class="linkish footer-privacy-btn">
-        API usage
+        Request activity
       </button>
       <span class="footer-sep" aria-hidden="true">·</span>
       <span class="footer-note">Read-only · data stays in this browser session</span>
@@ -639,12 +604,12 @@
     >
       <div class="welcome-backdrop" data-api-usage-close></div>
       <div class="welcome-dialog privacy-dialog">
-        <h2 id="api-usage-modal-title">API usage (this session)</h2>
+        <h2 id="api-usage-modal-title">Request activity (this session)</h2>
         <div class="privacy-modal-body">
           <p class="welcome-lead">
-            Counts Trello rate-limit units for this hub session only (batch URLs
-            count individually). Closing the hub clears the log. Token limit is
-            typically 300 units / 10 seconds.
+            Shows how much this hub talked to Trello this session. Closing the
+            hub clears it. Trello allows a limited burst of requests every few
+            seconds — if things slow down, wait a minute and try again.
           </p>
           <div id="api-usage-summary" class="api-usage-summary"></div>
           <div id="api-usage-buckets" class="api-usage-buckets"></div>
@@ -689,11 +654,13 @@
               written to cookies, localStorage, or sessionStorage.
             </li>
             <li>
-              Closing the hub clears that data. The next open needs a new Scan.
+              Closing the hub clears that data. The next open needs Load
+              checklists again.
             </li>
             <li>
-              Compact UI preferences (allowlist, saved views, density, items per
-              group) may be stored in <strong>cookies on this host only</strong>.
+              Compact UI preferences (saved board picks, saved views, density,
+              items per group) may be stored in
+              <strong>cookies on this host only</strong>.
             </li>
             <li>
               Your OAuth token is stored by <strong>Trello</strong> in Power-Up
@@ -776,18 +743,18 @@
       <div class="welcome-dialog">
         <h2 id="welcome-title">Get started</h2>
         <p class="welcome-lead" id="welcome-lead">
-          Authorize once, then scan the boards you need. Closing the hub clears
-          the list — scan again next time you open it.
+          Authorize once, tick the boards you need, then Load checklists.
+          Closing the hub clears the list — load again next time you open it.
         </p>
 
         <div id="welcome-teams-block" class="welcome-teams" hidden>
           <label class="field-label" for="welcome-team">Team</label>
           <select id="welcome-team" aria-describedby="welcome-team-hint">
-            <option value="">None — use List / Load below</option>
+            <option value="">None — pick boards yourself</option>
           </select>
           <p id="welcome-team-hint" class="welcome-note">
             Teams come from <code>Checklist Hub Team: …</code> on this board.
-            Choosing one sets Boards to load and assignees, then you can load
+            Choosing one preselects Boards and assignees, then you can load
             checklists for just those boards.
           </p>
           <button type="button" id="welcome-scan-team" class="btn btn-primary" disabled>
@@ -826,13 +793,14 @@
       <div class="welcome-dialog">
         <h2 id="scan-confirm-title">Load checklists again?</h2>
         <p class="welcome-lead">
-          This pulls checklist items from <strong>Boards to load</strong> (or
-          all boards if none are selected). It is not the same as refreshing the
-          board name list.
+          This pulls checklist items from the boards ticked under
+          <strong>Filters → Boards</strong>. It is not the same as refreshing
+          the board name list.
         </p>
         <p class="welcome-note">
           Prefer <strong>Update status</strong> for items you already have open.
-          Use this when you added boards to load, or want newly assigned work.
+          Use this when you added boards that have not been loaded yet, or want
+          newly assigned work.
         </p>
         <div class="welcome-actions">
           <button type="button" id="scan-confirm-cancel" class="btn btn-ghost">
