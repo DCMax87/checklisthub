@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Checklist Hub</title>
     <link rel="icon" href="./icons/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./css/dashboard.css?v=20260910a" />
+    <link rel="stylesheet" href="./css/dashboard.css?v=20260910c" />
   </head>
   <body class="dashboard-page">
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -764,47 +764,38 @@
     >
       <div class="welcome-backdrop" data-welcome-close></div>
       <div class="welcome-dialog">
-        <h2 id="welcome-title">A quick note on refreshing</h2>
-        <p class="welcome-lead">
-          Three steps: authorize once, scan boards when you open the hub, then
-          finish work on the Trello card. Closing the hub clears the list.
-          Optional: open from a board with
-          <code>Checklist Hub Team: …</code> checklists to pick a Team in Filters
-          (sets Assignees and Scan boards).
+        <h2 id="welcome-title">Get started</h2>
+        <p class="welcome-lead" id="welcome-lead">
+          Authorize once, then scan the boards you need. Closing the hub clears
+          the list — scan again next time you open it.
         </p>
-        <div class="welcome-points">
-          <div class="welcome-point">
-            <h3>
-              <span class="material-symbols-outlined" aria-hidden="true">sync</span>
-              Update status
-            </h3>
-            <p>
-              A light check on items you already have open here. Handy for
-              seeing what’s been completed since you last looked.
-            </p>
-          </div>
-          <div class="welcome-point">
-            <h3>
-              <span class="material-symbols-outlined" aria-hidden="true">radar</span>
-              Scan boards
-            </h3>
-            <p>
-              A fuller pass across your allowlisted boards (or all boards you
-              can access). Use this when you want newly assigned work to show
-              up.
-            </p>
-          </div>
+
+        <div id="welcome-teams-block" class="welcome-teams" hidden>
+          <label class="field-label" for="welcome-team">Team</label>
+          <select id="welcome-team" aria-describedby="welcome-team-hint">
+            <option value="">None — use Scan boards below</option>
+          </select>
+          <p id="welcome-team-hint" class="welcome-note">
+            Teams come from <code>Checklist Hub Team: …</code> checklists on this
+            board. Choosing one limits Scan to that team’s boards and assignees.
+          </p>
+          <button type="button" id="welcome-scan-team" class="btn btn-primary" disabled>
+            <span class="material-symbols-outlined" aria-hidden="true">group</span>
+            <span class="btn-label">Scan this team</span>
+          </button>
         </div>
-        <p class="welcome-note">
-          Prefer an allowlist, Update for day-to-day checks, and Scan when you
-          need newly assigned work on other boards.
-        </p>
-        <div class="welcome-actions">
+
+        <div class="welcome-actions welcome-actions-split">
           <button type="button" id="welcome-dismiss" class="btn btn-ghost">
             <span class="material-symbols-outlined" aria-hidden="true">check</span>
-            <span class="btn-label">Got it</span>
+            <span class="btn-label">Not now</span>
           </button>
-          <button type="button" id="welcome-scan" class="btn btn-primary">
+          <button
+            type="button"
+            id="welcome-scan"
+            class="btn btn-ghost"
+            title="Uses Scan these boards in Filters, or all boards if none are selected"
+          >
             <span class="material-symbols-outlined" aria-hidden="true">radar</span>
             <span class="btn-label">Scan boards</span>
           </button>
@@ -852,6 +843,6 @@
     <script src="./js/prefs.js?v=20260910a"></script>
     <script src="./js/mock-data.js?v=20260910a"></script>
     <script src="./js/api.js?v=20260910a"></script>
-    <script src="./js/dashboard.js?v=20260910b"></script>
+    <script src="./js/dashboard.js?v=20260910c"></script>
   </body>
 </html>

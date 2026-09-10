@@ -64,6 +64,10 @@
     welcomeModal: document.getElementById("welcome-modal"),
     welcomeDismiss: document.getElementById("welcome-dismiss"),
     welcomeScan: document.getElementById("welcome-scan"),
+    welcomeScanTeam: document.getElementById("welcome-scan-team"),
+    welcomeTeam: document.getElementById("welcome-team"),
+    welcomeTeamsBlock: document.getElementById("welcome-teams-block"),
+    welcomeLead: document.getElementById("welcome-lead"),
     welcomeHelpBtn: document.getElementById("welcome-help-btn"),
     scanNudge: document.getElementById("scan-nudge"),
     statusRefreshBanner: document.getElementById("status-refresh-banner"),
@@ -134,6 +138,7 @@
     applyDefaultViewPending: false,
     modalFocusBefore: null,
     demo: isDemo,
+    welcomeSkippedThisSession: false,
     teams: [],
     selectedTeamId: "",
     preferredAssignees: null,
@@ -2231,9 +2236,32 @@
     }
   }
 
+  function showWelcomeModal(force) {
+    if (!els.welcomeModal) return;
+    if (!force) {
+      if (state.data) return;
+      if (state.welcomeSkippedThisSession) return;
+    }
+    closeScanConfirm();
+    closePrivacyModal();
+    closeApiUsageModal();
+    syncWelcomeTeamsUi();
+    var focusEl =
+      (els.welcomeTeamsBlock &&
+        !els.welcomeTeamsBlock.hidden &&
+        els.welcomeTeam) ||
+      els.welcomeScanTeam ||
+      els.welcomeScan ||
+      els.welcomeDismiss;
+    openModalShell(els.welcomeModal, focusEl);
+  }
+
   function closeWelcomeModal(opts) {
     var options = opts || {};
     if (els.welcomeModal) els.welcomeModal.hidden = true;
+    if (options.persist || options.skipSession) {
+      state.welcomeSkippedThisSession = true;
+    }
     if (options.persist) {
       savePrefs({ welcomeDismissed: true });
     }
@@ -2241,15 +2269,6 @@
       document.body.classList.remove("welcome-open");
       restoreModalFocus();
     }
-  }
-
-  function showWelcomeModal(force) {
-    if (!els.welcomeModal) return;
-    if (!force && prefsApi.loadPrefs().welcomeDismissed) return;
-    closeScanConfirm();
-    closePrivacyModal();
-    closeApiUsageModal();
-    openModalShell(els.welcomeModal, els.welcomeScan || els.welcomeDismiss);
   }
 
   function openScanConfirm() {
@@ -2802,25 +2821,74 @@
   }
 
   function populateTeamsSelect(teams) {
-    if (!els.filterTeam) return;
-    var current = els.filterTeam.value || "";
-    els.filterTeam.innerHTML = "";
-    var none = document.createElement("option");
-    none.value = "";
-    none.textContent = "None";
-    els.filterTeam.appendChild(none);
-    (teams || []).forEach(function (team) {
-      var opt = document.createElement("option");
-      opt.value = team.id;
-      opt.textContent = team.name;
-      els.filterTeam.appendChild(opt);
-    });
-    if (current && (teams || []).some(function (t) { return t.id === current; })) {
-      els.filterTeam.value = current;
-    } else {
-      els.filterTeam.value = "";
+    if (!els.filterTeam && !els.welcomeTeam) return;
+    var list = teams || [];
+    var current =
+      (els.filterTeam && els.filterTeam.value) ||
+      state.selectedTeamId ||
+      "";
+
+    function fillSelect(select, includeNoneLabel) {
+      if (!select) return;
+      select.innerHTML = "";
+      var none = document.createElement("option");
+      none.value = "";
+      none.textContent = includeNoneLabel || "None";
+      select.appendChild(none);
+      list.forEach(function (team) {
+        var opt = document.createElement("option");
+        opt.value = team.id;
+        opt.textContent = team.name;
+        select.appendChild(opt);
+      });
+      if (current && list.some(function (t) { return t.id === current; })) {
+        select.value = current;
+      } else {
+        select.value = "";
+      }
+    }
+
+    fillSelect(els.filterTeam, "None");
+    fillSelect(
+      els.welcomeTeam,
+      "None — pick Scan boards below"
+    );
+    if (!(current && list.some(function (t) { return t.id === current; }))) {
       state.selectedTeamId = "";
     }
+    syncWelcomeTeamsUi();
+  }
+
+  function syncWelcomeTeamsUi() {
+    var hasTeams = state.teams && state.teams.length > 0;
+    if (els.welcomeTeamsBlock) {
+      els.welcomeTeamsBlock.hidden = !hasTeams;
+    }
+    if (els.welcomeLead) {
+      if (hasTeams) {
+        els.welcomeLead.textContent =
+          "Pick a team to scan only its boards, or scan your full allowlist. Closing the hub clears the list.";
+      } else if (state.teamsContextNote) {
+        els.welcomeLead.textContent =
+          "Scan your boards to load checklist work. " +
+          state.teamsContextNote +
+          " Closing the hub clears the list.";
+      } else {
+        els.welcomeLead.textContent =
+          "Scan the boards you need. Closing the hub clears the list — scan again next time you open it.";
+      }
+    }
+    if (els.welcomeTeam && els.filterTeam) {
+      els.welcomeTeam.value = els.filterTeam.value || "";
+    }
+    updateWelcomeScanTeamButton();
+  }
+
+  function updateWelcomeScanTeamButton() {
+    if (!els.welcomeScanTeam) return;
+    var teamId =
+      (els.welcomeTeam && els.welcomeTeam.value) || state.selectedTeamId || "";
+    els.welcomeScanTeam.disabled = !teamId;
   }
 
   function findTeamById(id) {
@@ -3332,14 +3400,48 @@
 
   if (els.welcomeDismiss) {
     els.welcomeDismiss.addEventListener("click", function () {
-      closeWelcomeModal({ persist: true });
+      closeWelcomeModal({ persist: true, skipSession: true });
     });
   }
 
   if (els.welcomeScan) {
     els.welcomeScan.addEventListener("click", function () {
-      // First scan only: skip confirm. Later opens use the confirm modal.
+      // Leave team selection; allowlist/cookie decides scope when no team is selected.
+      if (els.welcomeTeam) els.welcomeTeam.value = "";
+      if (els.filterTeam) els.filterTeam.value = "";
+      state.selectedTeamId = "";
+      closeWelcomeModal({ skipSession: true });
       runScan({ skipConfirm: !state.data });
+    });
+  }
+
+  if (els.welcomeTeam) {
+    els.welcomeTeam.addEventListener("change", function () {
+      var teamId = els.welcomeTeam.value || "";
+      if (els.filterTeam) els.filterTeam.value = teamId;
+      updateWelcomeScanTeamButton();
+      if (!teamId) {
+        state.selectedTeamId = "";
+        return;
+      }
+      applySelectedTeam(teamId).then(function () {
+        updateWelcomeScanTeamButton();
+      });
+    });
+  }
+
+  if (els.welcomeScanTeam) {
+    els.welcomeScanTeam.addEventListener("click", function () {
+      var teamId =
+        (els.welcomeTeam && els.welcomeTeam.value) ||
+        state.selectedTeamId ||
+        "";
+      if (!teamId) return;
+      closeWelcomeModal({ skipSession: true });
+      applySelectedTeam(teamId).then(function () {
+        if (teamBlocksScan()) return;
+        runScan({ skipConfirm: true });
+      });
     });
   }
 
@@ -3434,7 +3536,10 @@
 
   if (els.filterTeam) {
     els.filterTeam.addEventListener("change", function () {
-      applySelectedTeam(els.filterTeam.value || "");
+      var teamId = els.filterTeam.value || "";
+      if (els.welcomeTeam) els.welcomeTeam.value = teamId;
+      updateWelcomeScanTeamButton();
+      applySelectedTeam(teamId);
     });
   }
 
