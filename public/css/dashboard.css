@@ -432,17 +432,26 @@ h2 {
   grid-column: span 3;
 }
 
-/* Assignees + Show boards + Scan boards + Labels + Lists */
-.config-panel .field:nth-child(5),
+/* Team + Assignees + Show boards + Scan boards + Labels + Lists */
 .config-panel .field:nth-child(6),
 .config-panel .field:nth-child(7),
 .config-panel .field:nth-child(8),
-.config-panel .field:nth-child(9) {
+.config-panel .field:nth-child(9),
+.config-panel .field:nth-child(10),
+.config-panel .field:nth-child(11) {
   grid-column: span 4;
 }
 
 .config-panel .field-saved {
   grid-column: 1 / -1;
+}
+
+.config-panel #filter-team-hint {
+  margin-top: 0.35rem;
+}
+
+.config-panel #filter-team-hint code {
+  font-size: 0.68rem;
 }
 
 .config-panel .prefs-privacy-note {
@@ -2420,6 +2429,38 @@ body.density-compact .cal-expand-panel {
 
 .privacy-dialog .welcome-actions {
   margin-top: auto;
+}
+
+.api-usage-summary {
+  margin: 0 0 0.75rem;
+  font-size: 0.92rem;
+}
+
+.api-usage-buckets {
+  max-height: 240px;
+  overflow: auto;
+}
+
+.api-usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.api-usage-table th,
+.api-usage-table td {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.api-usage-table tr.is-warn td {
+  background: rgba(196, 140, 58, 0.12);
+}
+
+.api-usage-table tr.is-over td {
+  background: rgba(180, 60, 60, 0.12);
+  font-weight: 500;
 }
 
 @media (max-width: 520px) {

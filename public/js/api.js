@@ -10,6 +10,8 @@
    * Cleared on Scan and when the tab closes — never sessionStorage/localStorage.
    */
   let memoryCache = null;
+  const TEAM_CHECKLIST_RE = /^Checklist Hub Team:\s*(.+)$/i;
+  const API_LOG_MAX = 500;
 
   function sleep(ms) {
     return new Promise(function (resolve) {
@@ -25,6 +27,38 @@
     return out;
   }
 
+  function isTeamConfigChecklist(name) {
+    return TEAM_CHECKLIST_RE.test(String(name || "").trim());
+  }
+
+  function extractShortLink(text) {
+    const raw = String(text || "").trim();
+    if (!raw) return null;
+    const fromUrl = raw.match(/\/b\/([a-zA-Z0-9]+)(?:\/|$|\?|#)/i);
+    if (fromUrl) return fromUrl[1];
+    if (/^[a-zA-Z0-9]{6,12}$/.test(raw)) return raw;
+    return null;
+  }
+
+  function effectiveCheckItemState(checkItem, card) {
+    if (checkItem && checkItem.state === "complete") return "complete";
+    if (card && (card.closed || card.dueComplete)) return "complete";
+    return (checkItem && checkItem.state) || "incomplete";
+  }
+
+  function logApiUsage(units, label) {
+    const root = document.getElementById("api-usage-log");
+    if (!root) return;
+    const row = document.createElement("div");
+    row.setAttribute("data-at", String(Date.now()));
+    row.setAttribute("data-units", String(Math.max(1, Number(units) || 1)));
+    row.setAttribute("data-label", String(label || "request"));
+    root.appendChild(row);
+    while (root.children.length > API_LOG_MAX) {
+      root.removeChild(root.firstChild);
+    }
+  }
+
   async function trelloFetch(path, token, options) {
     const opts = options || {};
     const params = new URLSearchParams(opts.query || {});
@@ -37,6 +71,11 @@
       path +
       (path.indexOf("?") >= 0 ? "&" : "?") +
       params.toString();
+
+    logApiUsage(
+      opts.units != null ? opts.units : 1,
+      opts.label || method + " " + path.split("?")[0]
+    );
 
     let attempt = 0;
     while (true) {
@@ -287,12 +326,14 @@
     membersById,
     listNameById
   ) {
+    if (isTeamConfigChecklist(checklist && checklist.name)) return;
     const memberId = checkItem.idMember || null;
+    const memberIds = (card && card.idMembers) || [];
     items.push({
       kind: "checkitem",
       id: checkItem.id,
       name: checkItem.name,
-      state: checkItem.state,
+      state: effectiveCheckItemState(checkItem, card),
       due: checkItem.due || null,
       idMember: memberId,
       assigneeName: memberId
@@ -309,6 +350,9 @@
       listName: listNameFromMaps(card, listNameById),
       labels: normalizeCardLabels(card),
       pos: checkItem.pos,
+      idMembers: memberIds.slice(),
+      cardDueComplete: Boolean(card && card.dueComplete),
+      cardClosed: Boolean(card && card.closed),
     });
   }
 
@@ -316,6 +360,7 @@
     const items = [];
     (cards || []).forEach(function (card) {
       (card.checklists || []).forEach(function (checklist) {
+        if (isTeamConfigChecklist(checklist.name)) return;
         (checklist.checkItems || []).forEach(function (checkItem) {
           pushCheckItem(
             items,
@@ -345,12 +390,16 @@
 
     const checklistSource =
       payload.checklists && payload.checklists.length
-        ? payload.checklists.map(function (checklist) {
-            return {
-              checklist: checklist,
-              card: cardsById[checklist.idCard] || {},
-            };
-          })
+        ? payload.checklists
+            .filter(function (checklist) {
+              return !isTeamConfigChecklist(checklist.name);
+            })
+            .map(function (checklist) {
+              return {
+                checklist: checklist,
+                card: cardsById[checklist.idCard] || {},
+              };
+            })
         : [];
 
     if (!checklistSource.length) {
@@ -375,6 +424,118 @@
       });
     });
     return items;
+  }
+
+  function parseTeamsFromBoardPayload(payload) {
+    const membersById = {};
+    (payload.members || []).forEach(function (member) {
+      if (member && member.id) membersById[member.id] = member;
+    });
+    const teams = [];
+    (payload.checklists || []).forEach(function (checklist) {
+      const match = String(checklist.name || "")
+        .trim()
+        .match(TEAM_CHECKLIST_RE);
+      if (!match) return;
+      const team = {
+        id: checklist.id,
+        name: match[1].trim() || "Team",
+        checklistId: checklist.id,
+        members: [],
+        memberIds: [],
+        boardShortLinks: [],
+        boardIds: [],
+      };
+      const seenMembers = {};
+      const seenLinks = {};
+      (checklist.checkItems || []).forEach(function (checkItem) {
+        if (checkItem.idMember) {
+          if (seenMembers[checkItem.idMember]) return;
+          seenMembers[checkItem.idMember] = true;
+          team.memberIds.push(checkItem.idMember);
+          team.members.push(
+            membersById[checkItem.idMember] || {
+              id: checkItem.idMember,
+              fullName: "Member",
+              username: "",
+            }
+          );
+          return;
+        }
+        const shortLink = extractShortLink(checkItem.name);
+        if (shortLink && !seenLinks[shortLink]) {
+          seenLinks[shortLink] = true;
+          team.boardShortLinks.push(shortLink);
+        }
+      });
+      teams.push(team);
+    });
+    teams.sort(function (a, b) {
+      return a.name.localeCompare(b.name);
+    });
+    return teams;
+  }
+
+  async function loadTeamConfig(token, boardId, options) {
+    const opts = options || {};
+    if (!boardId) {
+      return { board: null, teams: [], members: [] };
+    }
+    const payload = await trelloFetch(boardNestedRoute(boardId), token, {
+      signal: opts.signal || null,
+      label: "team-config",
+      units: 1,
+    });
+    return {
+      board: payload
+        ? { id: payload.id, name: payload.name || "" }
+        : null,
+      teams: parseTeamsFromBoardPayload(payload || {}),
+      members: (payload && payload.members) || [],
+    };
+  }
+
+  async function resolveBoardShortLinks(token, shortLinks, options) {
+    const opts = options || {};
+    const unique = [];
+    const seen = {};
+    (shortLinks || []).forEach(function (link) {
+      if (!link || seen[link]) return;
+      seen[link] = true;
+      unique.push(link);
+    });
+    if (!unique.length) return [];
+
+    const routes = unique.map(function (link) {
+      return (
+        "/boards/" +
+        encodeURIComponent(link) +
+        "?fields=id,name,shortLink"
+      );
+    });
+    const resolved = [];
+    const chunks = chunk(routes, BATCH_SIZE);
+    for (let i = 0; i < chunks.length; i += 1) {
+      assertNotAborted(opts.signal || null);
+      const batch = await fetchBatch(chunks[i], token, {
+        signal: opts.signal || null,
+        label: "resolve-boards",
+      });
+      chunks[i].forEach(function (route, idx) {
+        const status = batchItemStatus(batch[idx]);
+        const requested = decodeURIComponent(
+          route.split("/")[2].split("?")[0]
+        );
+        if (status.ok && status.data && status.data.id) {
+          resolved.push({
+            id: status.data.id,
+            name: status.data.name || "",
+            shortLink: status.data.shortLink || requested,
+          });
+        }
+      });
+    }
+    return resolved;
   }
 
   /**
@@ -437,9 +598,12 @@
 
   async function fetchBatch(routes, token, options) {
     if (!routes.length) return [];
+    const opts = options || {};
     return trelloFetch("/batch", token, {
       query: { urls: routes.join(",") },
-      signal: options && options.signal,
+      signal: opts.signal,
+      units: routes.length,
+      label: opts.label || "batch",
     });
   }
 
@@ -454,7 +618,7 @@
   async function loadBoardsBundle(token, options) {
     const opts = options || {};
     const onProgress = opts.onProgress;
-    const allowlist = opts.boardIds || null;
+    const allowlist = opts.boardIds;
     const signal = opts.signal || null;
     const boardErrors = [];
 
@@ -513,7 +677,7 @@
       httpCalls = 1;
       bootstrapUnits = 2;
 
-      if (allowlist && allowlist.length) {
+      if (Array.isArray(allowlist)) {
         const allowed = {};
         allowlist.forEach(function (id) {
           allowed[id] = true;
@@ -912,14 +1076,16 @@
     });
 
     const nextItems = [];
+    const freshMemberIds = fresh.idMembers || [];
     (fresh.checklists || []).forEach(function (checklist) {
+      if (isTeamConfigChecklist(checklist.name)) return;
       (checklist.checkItems || []).forEach(function (checkItem) {
         const memberId = checkItem.idMember || null;
         nextItems.push({
           kind: "checkitem",
           id: checkItem.id,
           name: checkItem.name,
-          state: checkItem.state,
+          state: effectiveCheckItemState(checkItem, fresh),
           due: checkItem.due || null,
           idMember: memberId,
           assigneeName: memberId
@@ -937,6 +1103,9 @@
           listName: listNameFromMaps(fresh, listNameById),
           labels: normalizeCardLabels(fresh),
           pos: checkItem.pos,
+          idMembers: freshMemberIds.slice(),
+          cardDueComplete: Boolean(fresh.dueComplete),
+          cardClosed: Boolean(fresh.closed),
         });
       });
     });
@@ -1279,5 +1448,10 @@
     refreshKnownMemberCards: refreshKnownMemberCards,
     clearCache: clearCache,
     readCache: readCache,
+    loadTeamConfig: loadTeamConfig,
+    resolveBoardShortLinks: resolveBoardShortLinks,
+    parseTeamsFromBoardPayload: parseTeamsFromBoardPayload,
+    extractShortLink: extractShortLink,
+    isTeamConfigChecklist: isTeamConfigChecklist,
   };
 })(window);

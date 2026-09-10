@@ -482,6 +482,16 @@
           next.listId = list.id;
           next.listName = list.name;
         }
+        if (!next.idMembers) {
+          if (next.idMember) {
+            next.idMembers = [next.idMember];
+            if (next.idMember !== me.id && index % 2 === 0) {
+              next.idMembers.push(me.id);
+            }
+          } else {
+            next.idMembers = [me.id];
+          }
+        }
         return next;
       }
 
@@ -500,6 +510,31 @@
           return enrich(card, index + items.length);
         }),
       };
+    },
+
+    getDemoTeams: function () {
+      return [
+        {
+          id: "demo-team-platform",
+          name: "Platform",
+          checklistId: "demo-team-platform",
+          members: [me, members[1], members[2]],
+          memberIds: [me.id, members[1].id, members[2].id],
+          boardShortLinks: ["opsBoard", "launchBoard"],
+          demoBoardIds: [boards[0].id, boards[1].id],
+          boardIds: [boards[0].id, boards[1].id],
+        },
+        {
+          id: "demo-team-support",
+          name: "Support",
+          checklistId: "demo-team-support",
+          members: [me, members[3]],
+          memberIds: [me.id, members[3].id],
+          boardShortLinks: ["supportBoard"],
+          demoBoardIds: [boards[2].id],
+          boardIds: [boards[2].id],
+        },
+      ];
     },
   };
 })(window);

@@ -80,6 +80,13 @@
     privacyModal: document.getElementById("privacy-modal"),
     privacyOpenBtn: document.getElementById("privacy-open-btn"),
     privacyModalClose: document.getElementById("privacy-modal-close"),
+    filterTeam: document.getElementById("filter-team"),
+    apiUsageLog: document.getElementById("api-usage-log"),
+    apiUsageOpenBtn: document.getElementById("api-usage-open-btn"),
+    apiUsageModal: document.getElementById("api-usage-modal"),
+    apiUsageModalClose: document.getElementById("api-usage-modal-close"),
+    apiUsageSummary: document.getElementById("api-usage-summary"),
+    apiUsageBuckets: document.getElementById("api-usage-buckets"),
     groupField: document.getElementById("group-field"),
     calendarWrap: document.getElementById("calendar-wrap"),
     calendarGrid: document.getElementById("calendar-grid"),
@@ -127,6 +134,11 @@
     applyDefaultViewPending: false,
     modalFocusBefore: null,
     demo: isDemo,
+    teams: [],
+    selectedTeamId: "",
+    preferredAssignees: null,
+    assigneeDirectory: {},
+    teamsContextNote: "",
   };
 
   if (els.filterGroup) {
@@ -406,7 +418,77 @@
       if (item.dueComplete) return "complete";
       return item.state || "incomplete";
     }
-    return item.state;
+    if (item.cardClosed || item.cardDueComplete) return "complete";
+    return item.state || "incomplete";
+  }
+
+  function registerAssigneeMember(member) {
+    if (!member || !member.id) return;
+    state.assigneeDirectory[member.id] = {
+      id: member.id,
+      fullName: member.fullName || member.username || "Member",
+      username: member.username || "",
+    };
+  }
+
+  function viewerMemberId() {
+    return (
+      (state.data && state.data.me && state.data.me.id) ||
+      (state.demo && "member-me") ||
+      null
+    );
+  }
+
+  function selectedPeopleIds() {
+    var meId = viewerMemberId();
+    var assignees = els.filterAssignee
+      ? getCheckedValues(els.filterAssignee)
+      : [];
+    var ids = [];
+    var seen = {};
+    assignees.forEach(function (value) {
+      var id = null;
+      if (value === "me") id = meId;
+      else if (value && value !== "unassigned") id = value;
+      if (!id || seen[id]) return;
+      seen[id] = true;
+      ids.push(id);
+    });
+    return ids;
+  }
+
+  function isViewerOnlyAssignees() {
+    var people = selectedPeopleIds();
+    var meId = viewerMemberId();
+    return people.length === 1 && meId && people[0] === meId;
+  }
+
+  function updateAssigneeVisibilityBanner() {
+    if (!state.data || !els.filterAssignee) return;
+    var people = selectedPeopleIds();
+    if (!people.length || isViewerOnlyAssignees()) {
+      if (
+        els.banner &&
+        !els.banner.hidden &&
+        els.banner.getAttribute("data-banner-kind") === "shared-boards"
+      ) {
+        showBanner(null);
+      }
+      return;
+    }
+    if (
+      els.banner &&
+      !els.banner.hidden &&
+      (els.banner.getAttribute("data-banner-kind") === "privacy" ||
+        els.banner.getAttribute("data-banner-kind") === "error")
+    ) {
+      return;
+    }
+    showBanner(
+      "You only see tasks on boards you can access — typically boards shared with the people you selected.",
+      "info",
+      { dismissible: true, bannerKind: "shared-boards" }
+    );
   }
 
   function getCheckedValues(root) {
@@ -518,6 +600,13 @@
   }
 
   function getAllowlistBoardIds() {
+    if (state.selectedTeamId) {
+      var team = findTeamById(state.selectedTeamId);
+      if (team && team.boardIds && team.boardIds.length) {
+        return team.boardIds.slice();
+      }
+      return [];
+    }
     if (els.allowlistBoards) {
       var optionCount = els.allowlistBoards.querySelectorAll(
         'input[type="checkbox"]'
@@ -605,9 +694,18 @@
 
   function populateAssignees(members, me) {
     var container = document.getElementById("filter-assignee-options");
+    if (!container || !els.filterAssignee) return;
     var previous = getCheckedValues(els.filterAssignee);
     var hadOptions =
       els.filterAssignee.querySelectorAll('input[type="checkbox"]').length > 0;
+    if (
+      !hadOptions &&
+      state.preferredAssignees &&
+      state.preferredAssignees.length
+    ) {
+      previous = state.preferredAssignees.slice();
+      hadOptions = true;
+    }
     container.innerHTML = "";
 
     var meId = me && me.id;
@@ -618,20 +716,25 @@
       meLabel,
       !hadOptions ? true : previous.indexOf("me") >= 0
     );
-    addOption(
-      container,
-      "unassigned",
-      "Unassigned",
-      hadOptions && previous.indexOf("unassigned") >= 0
-    );
 
-    members
-      .slice()
+    (members || []).forEach(registerAssigneeMember);
+    Object.keys(state.assigneeDirectory).forEach(function (id) {
+      registerAssigneeMember(state.assigneeDirectory[id]);
+    });
+
+    var listed = {};
+    if (meId) listed[meId] = true;
+
+    Object.keys(state.assigneeDirectory)
+      .map(function (id) {
+        return state.assigneeDirectory[id];
+      })
       .sort(function (a, b) {
         return (a.fullName || "").localeCompare(b.fullName || "");
       })
       .forEach(function (member) {
-        if (!member || !member.id || (meId && member.id === meId)) return;
+        if (!member || !member.id || listed[member.id]) return;
+        listed[member.id] = true;
         var label = member.fullName || member.username || member.id;
         addOption(
           container,
@@ -641,6 +744,20 @@
         );
       });
 
+    if (hadOptions) {
+      previous.forEach(function (value) {
+        if (value === "me" || value === "unassigned") return;
+        if (listed[value]) return;
+        var member = state.assigneeDirectory[value] || {
+          id: value,
+          fullName: value,
+        };
+        addOption(container, value, member.fullName || value, true);
+        listed[value] = true;
+      });
+    }
+
+    state.preferredAssignees = getCheckedValues(els.filterAssignee);
     updateAssigneeSummary();
   }
 
@@ -655,24 +772,25 @@
   }
 
   function matchesFilters(item) {
-    var meId = state.data && state.data.me && state.data.me.id;
-    var assignees = getCheckedValues(els.filterAssignee);
+    var people = selectedPeopleIds();
     var boards = getCheckedValues(els.filterBoard);
     var status = els.filterStatus.value;
     var due = els.filterDue.value;
     var q = (els.filterSearch.value || "").trim().toLowerCase();
     var rowState = itemState(item);
 
-    if (assignees.length) {
-      var wantsUnassigned = assignees.indexOf("unassigned") >= 0;
-      var wantsMe = assignees.indexOf("me") >= 0;
-      var memberIds = assignees.filter(function (v) {
-        return v !== "me" && v !== "unassigned";
-      });
+    if (!people.length) {
+      // Anyone: assigned work only — no org-wide unassigned dump.
+      if (!item.idMember) return false;
+    } else {
       var ok = false;
-      if (wantsUnassigned && !item.idMember) ok = true;
-      if (wantsMe && meId && item.idMember === meId) ok = true;
-      if (item.idMember && memberIds.indexOf(item.idMember) >= 0) ok = true;
+      if (item.idMember && people.indexOf(item.idMember) >= 0) ok = true;
+      if (!item.idMember) {
+        var cardMembers = item.idMembers || [];
+        ok = people.some(function (id) {
+          return cardMembers.indexOf(id) >= 0;
+        });
+      }
       if (!ok) return false;
     }
 
@@ -900,10 +1018,11 @@
       };
     }
     if (mode === "assignee") {
+      var isUnassigned = !item.idMember;
       return {
         id: item.idMember || "unassigned",
         label: item.assigneeName || "Unassigned",
-        order: (item.assigneeName || "zzz").toLowerCase(),
+        order: isUnassigned ? "\uffff" : (item.assigneeName || "").toLowerCase(),
       };
     }
     if (mode === "card") {
@@ -1494,6 +1613,7 @@
     updateFocusChips();
     updateFilterSummary();
     updateScanNudge();
+    updateAssigneeVisibilityBanner();
 
     var isEmpty = !filtered.length;
     els.emptyState.hidden = !isEmpty;
@@ -1869,6 +1989,17 @@
     closeScanConfirm();
     closeWelcomeModal({ persist: true });
     closeSyncMenu();
+    if (teamBlocksScan()) {
+      var team = findTeamById(state.selectedTeamId);
+      showBanner(
+        "Team “" +
+          ((team && team.name) || "selected") +
+          "” has no boards to scan. Add board shortLinks to the team checklist, or choose None.",
+        "info",
+        { dismissible: true }
+      );
+      return Promise.resolve();
+    }
     if (state.scanAbort) {
       try {
         state.scanAbort.abort();
@@ -2042,6 +2173,7 @@
       return els.scanConfirmModal;
     }
     if (els.privacyModal && !els.privacyModal.hidden) return els.privacyModal;
+    if (els.apiUsageModal && !els.apiUsageModal.hidden) return els.apiUsageModal;
     return null;
   }
 
@@ -2099,10 +2231,7 @@
     if (options.persist) {
       savePrefs({ welcomeDismissed: true });
     }
-    if (
-      (!els.scanConfirmModal || els.scanConfirmModal.hidden) &&
-      (!els.privacyModal || els.privacyModal.hidden)
-    ) {
+    if (noOtherModalOpen()) {
       document.body.classList.remove("welcome-open");
       restoreModalFocus();
     }
@@ -2113,6 +2242,7 @@
     if (!force && prefsApi.loadPrefs().welcomeDismissed) return;
     closeScanConfirm();
     closePrivacyModal();
+    closeApiUsageModal();
     openModalShell(els.welcomeModal, els.welcomeScan || els.welcomeDismiss);
   }
 
@@ -2122,16 +2252,13 @@
       return;
     }
     closePrivacyModal();
+    closeApiUsageModal();
     openModalShell(els.scanConfirmModal, els.scanConfirmOk);
   }
 
   function closeScanConfirm() {
     if (els.scanConfirmModal) els.scanConfirmModal.hidden = true;
-    if (
-      (!els.welcomeModal || els.welcomeModal.hidden) &&
-      (!els.scanConfirmModal || els.scanConfirmModal.hidden) &&
-      (!els.privacyModal || els.privacyModal.hidden)
-    ) {
+    if (noOtherModalOpen()) {
       document.body.classList.remove("welcome-open");
       restoreModalFocus();
     }
@@ -2141,6 +2268,7 @@
     if (!els.privacyModal) return;
     closeWelcomeModal();
     closeScanConfirm();
+    closeApiUsageModal();
     openModalShell(
       els.privacyModal,
       els.privacyModalClose ||
@@ -2150,11 +2278,7 @@
 
   function closePrivacyModal() {
     if (els.privacyModal) els.privacyModal.hidden = true;
-    if (
-      (!els.welcomeModal || els.welcomeModal.hidden) &&
-      (!els.scanConfirmModal || els.scanConfirmModal.hidden) &&
-      (!els.privacyModal || els.privacyModal.hidden)
-    ) {
+    if (noOtherModalOpen()) {
       document.body.classList.remove("welcome-open");
       restoreModalFocus();
     }
@@ -2244,7 +2368,15 @@
     var opts = options || {};
     state.data = data;
     resetGroupVisibleCounts();
+    (data.members || []).forEach(registerAssigneeMember);
+    if (data.me) registerAssigneeMember(data.me);
     populateAllowlistBoards(data.boards);
+    if (state.selectedTeamId) {
+      var team = findTeamById(state.selectedTeamId);
+      if (team && team.boardIds && team.boardIds.length) {
+        applyAllowlistBoardIds(team.boardIds);
+      }
+    }
     populateBoards(data.boards);
     populateLabels(data.labels || []);
     populateLists(data.lists || []);
@@ -2636,6 +2768,330 @@
       .finally(finish);
   }
 
+  function noOtherModalOpen() {
+    return (
+      (!els.welcomeModal || els.welcomeModal.hidden) &&
+      (!els.scanConfirmModal || els.scanConfirmModal.hidden) &&
+      (!els.privacyModal || els.privacyModal.hidden) &&
+      (!els.apiUsageModal || els.apiUsageModal.hidden)
+    );
+  }
+
+  function populateTeamsSelect(teams) {
+    if (!els.filterTeam) return;
+    var current = els.filterTeam.value || "";
+    els.filterTeam.innerHTML = "";
+    var none = document.createElement("option");
+    none.value = "";
+    none.textContent = "None";
+    els.filterTeam.appendChild(none);
+    (teams || []).forEach(function (team) {
+      var opt = document.createElement("option");
+      opt.value = team.id;
+      opt.textContent = team.name;
+      els.filterTeam.appendChild(opt);
+    });
+    if (current && (teams || []).some(function (t) { return t.id === current; })) {
+      els.filterTeam.value = current;
+    } else {
+      els.filterTeam.value = "";
+      state.selectedTeamId = "";
+    }
+  }
+
+  function findTeamById(id) {
+    if (!id) return null;
+    for (var i = 0; i < state.teams.length; i += 1) {
+      if (state.teams[i].id === id) return state.teams[i];
+    }
+    return null;
+  }
+
+  function teamBlocksScan() {
+    var team = findTeamById(state.selectedTeamId);
+    if (!team) return false;
+    return !(team.boardIds && team.boardIds.length);
+  }
+
+  function setAssigneeSelectionForTeam(team) {
+    var meId = viewerMemberId();
+    (team.members || []).forEach(registerAssigneeMember);
+    var values = [];
+    (team.memberIds || []).forEach(function (id) {
+      if (meId && id === meId) {
+        if (values.indexOf("me") < 0) values.push("me");
+      } else if (values.indexOf(id) < 0) {
+        values.push(id);
+      }
+    });
+    if (!values.length && meId) values = ["me"];
+    state.preferredAssignees = values.slice();
+    var me = (state.data && state.data.me) ||
+      (state.demo
+        ? { id: "member-me", fullName: "Alex Rivera" }
+        : null);
+    populateAssignees(
+      (state.data && state.data.members) || team.members || [],
+      me || { id: meId, fullName: "you" }
+    );
+    setCheckedValues(els.filterAssignee, values);
+    state.preferredAssignees = getCheckedValues(els.filterAssignee);
+    updateAssigneeSummary();
+    updateAssigneeVisibilityBanner();
+  }
+
+  function applyAllowlistBoardIds(boardIds) {
+    if (!els.allowlistBoards) return;
+    var container = document.getElementById("allowlist-board-options");
+    var ids = boardIds || [];
+    if (container) {
+      var existing = {};
+      container.querySelectorAll('input[type="checkbox"]').forEach(function (input) {
+        existing[input.value] = true;
+        input.checked = ids.indexOf(input.value) >= 0;
+      });
+      ids.forEach(function (id) {
+        if (existing[id]) return;
+        var team = findTeamById(state.selectedTeamId);
+        var name = id;
+        if (team && team.resolvedBoards) {
+          team.resolvedBoards.forEach(function (b) {
+            if (b.id === id) name = b.name || id;
+          });
+        }
+        addOption(container, id, name, true);
+      });
+    }
+    persistAllowlist();
+  }
+
+  function applySelectedTeam(teamId) {
+    state.selectedTeamId = teamId || "";
+    if (!teamId) {
+      updateAssigneeVisibilityBanner();
+      if (state.data) renderTable();
+      return Promise.resolve();
+    }
+    var team = findTeamById(teamId);
+    if (!team) return Promise.resolve();
+
+    setAssigneeSelectionForTeam(team);
+
+    var resolveLinks = function () {
+      if (state.demo) {
+        team.boardIds = (team.demoBoardIds || []).slice();
+        team.resolvedBoards = team.boardIds.map(function (id) {
+          var board =
+            ((state.data && state.data.boards) || []).find(function (b) {
+              return b.id === id;
+            }) || { id: id, name: id };
+          return { id: board.id, name: board.name || id, shortLink: id };
+        });
+        return Promise.resolve(team.resolvedBoards);
+      }
+      if (!state.token || !team.boardShortLinks || !team.boardShortLinks.length) {
+        team.boardIds = [];
+        team.resolvedBoards = [];
+        return Promise.resolve([]);
+      }
+      return api
+        .resolveBoardShortLinks(state.token, team.boardShortLinks)
+        .then(function (resolved) {
+          team.resolvedBoards = resolved || [];
+          team.boardIds = team.resolvedBoards.map(function (b) {
+            return b.id;
+          });
+          return team.resolvedBoards;
+        });
+    };
+
+    return resolveLinks()
+      .then(function () {
+        if (!team.boardIds || !team.boardIds.length) {
+          showBanner(
+            "Team “" +
+              team.name +
+              "” has no resolvable board shortLinks. Add shortLinks to the team checklist before Scan.",
+            "info",
+            { dismissible: true }
+          );
+          applyAllowlistBoardIds([]);
+          return;
+        }
+        applyAllowlistBoardIds(team.boardIds);
+        if (state.data) renderTable();
+      })
+      .catch(function (err) {
+        showErrorBanner(err, "Resolve team boards");
+      });
+  }
+
+  function loadTeamsFromContext() {
+    if (state.demo) {
+      var mock =
+        window.ChecklistHubMock && window.ChecklistHubMock.getDemoTeams
+          ? window.ChecklistHubMock.getDemoTeams()
+          : [];
+      state.teams = mock || [];
+      state.teams.forEach(function (team) {
+        (team.members || []).forEach(registerAssigneeMember);
+      });
+      populateTeamsSelect(state.teams);
+      state.teamsContextNote = state.teams.length
+        ? ""
+        : "Demo teams unavailable.";
+      return Promise.resolve();
+    }
+
+    var boardId = null;
+    try {
+      if (typeof t.getContext === "function") {
+        var ctx = t.getContext();
+        if (ctx && ctx.board) {
+          boardId =
+            typeof ctx.board === "string"
+              ? ctx.board
+              : ctx.board.id || null;
+        }
+      }
+    } catch (e) {
+      boardId = null;
+    }
+
+    if (!boardId) {
+      state.teams = [];
+      populateTeamsSelect([]);
+      state.teamsContextNote =
+        "Open from the Checklist Hub board to load teams.";
+      return Promise.resolve();
+    }
+
+    return api
+      .loadTeamConfig(state.token, boardId)
+      .then(function (result) {
+        state.teams = (result && result.teams) || [];
+        ((result && result.members) || []).forEach(registerAssigneeMember);
+        populateTeamsSelect(state.teams);
+        state.teamsContextNote = state.teams.length
+          ? ""
+          : "No Checklist Hub Team checklists on this board.";
+      })
+      .catch(function () {
+        state.teams = [];
+        populateTeamsSelect([]);
+        state.teamsContextNote = "Could not load teams from this board.";
+      });
+  }
+
+  function preprocessApiUsageLog() {
+    var root = els.apiUsageLog || document.getElementById("api-usage-log");
+    var rows = root ? root.children : [];
+    var totalUnits = 0;
+    var totalCalls = rows.length;
+    var buckets = {};
+    Array.prototype.forEach.call(rows, function (row) {
+      var at = Number(row.getAttribute("data-at")) || 0;
+      var units = Number(row.getAttribute("data-units")) || 1;
+      totalUnits += units;
+      var bucket = Math.floor(at / 10000) * 10000;
+      if (!buckets[bucket]) buckets[bucket] = { at: bucket, units: 0, calls: 0 };
+      buckets[bucket].units += units;
+      buckets[bucket].calls += 1;
+    });
+    var list = Object.keys(buckets)
+      .map(function (key) {
+        return buckets[key];
+      })
+      .sort(function (a, b) {
+        return b.at - a.at;
+      });
+    var peak = 0;
+    list.forEach(function (b) {
+      if (b.units > peak) peak = b.units;
+    });
+    return {
+      totalUnits: totalUnits,
+      totalCalls: totalCalls,
+      peak: peak,
+      buckets: list,
+      limit: 300,
+    };
+  }
+
+  function renderApiUsageModal() {
+    var stats = preprocessApiUsageLog();
+    if (els.apiUsageSummary) {
+      els.apiUsageSummary.innerHTML =
+        "<p><strong>" +
+        stats.totalCalls +
+        "</strong> request" +
+        (stats.totalCalls === 1 ? "" : "s") +
+        " · <strong>" +
+        stats.totalUnits +
+        "</strong> rate-limit unit" +
+        (stats.totalUnits === 1 ? "" : "s") +
+        " · peak <strong>" +
+        stats.peak +
+        "</strong> / " +
+        stats.limit +
+        " in a 10s window</p>";
+    }
+    if (els.apiUsageBuckets) {
+      if (!stats.buckets.length) {
+        els.apiUsageBuckets.innerHTML =
+          "<p class=\"field-hint\">No API calls logged yet in this session.</p>";
+      } else {
+        var html =
+          '<table class="api-usage-table"><thead><tr><th>10s window</th><th>Units</th><th>Calls</th></tr></thead><tbody>';
+        stats.buckets.forEach(function (bucket) {
+          var warn =
+            bucket.units >= stats.limit
+              ? " is-over"
+              : bucket.units >= stats.limit * 0.8
+                ? " is-warn"
+                : "";
+          var start = new Date(bucket.at);
+          var end = new Date(bucket.at + 10000);
+          html +=
+            '<tr class="' +
+            warn.trim() +
+            '"><td>' +
+            start.toLocaleTimeString() +
+            " – " +
+            end.toLocaleTimeString() +
+            "</td><td>" +
+            bucket.units +
+            "</td><td>" +
+            bucket.calls +
+            "</td></tr>";
+        });
+        html += "</tbody></table>";
+        els.apiUsageBuckets.innerHTML = html;
+      }
+    }
+  }
+
+  function openApiUsageModal() {
+    if (!els.apiUsageModal) return;
+    closeWelcomeModal();
+    closeScanConfirm();
+    closePrivacyModal();
+    renderApiUsageModal();
+    openModalShell(
+      els.apiUsageModal,
+      els.apiUsageModalClose ||
+        els.apiUsageModal.querySelector(".welcome-dialog button")
+    );
+  }
+
+  function closeApiUsageModal() {
+    if (els.apiUsageModal) els.apiUsageModal.hidden = true;
+    if (noOtherModalOpen()) {
+      document.body.classList.remove("welcome-open");
+      restoreModalFocus();
+    }
+  }
+
   function bootstrapHub() {
     state.applyDefaultViewPending = true;
     if (state.demo) {
@@ -2646,19 +3102,32 @@
         "Demo mode — sample data only. Read-only hub: open cards in Trello to complete work.",
         "info"
       );
-      showIdleWorkspace();
-      showWelcomeModal();
-      return Promise.resolve();
+      return loadTeamsFromContext().then(function () {
+        if (state.teamsContextNote && els.filterTeam) {
+          els.filterTeam.title = state.teamsContextNote;
+        }
+        showIdleWorkspace();
+        showWelcomeModal();
+      });
     }
 
-    return ensureAuthorized().then(function (token) {
-      if (!token) return;
-      state.token = token;
-      els.subtitle.textContent =
-        "Authorized · Step 2: Scan boards to load work";
-      showIdleWorkspace();
-      showWelcomeModal();
-    });
+    return ensureAuthorized()
+      .then(function (token) {
+        if (!token) return null;
+        state.token = token;
+        els.subtitle.textContent =
+          "Authorized · Step 2: Scan boards to load work";
+        return loadTeamsFromContext();
+      })
+      .then(function (loaded) {
+        if (!state.token) return;
+        if (state.teamsContextNote) {
+          els.subtitle.textContent =
+            "Authorized · " + state.teamsContextNote;
+        }
+        showIdleWorkspace();
+        showWelcomeModal();
+      });
   }
 
   els.refreshBtn.addEventListener("click", function () {
@@ -2722,10 +3191,13 @@
       .then(function (token) {
         if (!token) return;
         state.token = token;
-        els.subtitle.textContent =
-          "Authorized · Step 2: Scan boards to load work";
-        showIdleWorkspace();
-        showWelcomeModal(true);
+        return loadTeamsFromContext().then(function () {
+          els.subtitle.textContent = state.teamsContextNote
+            ? "Authorized · " + state.teamsContextNote
+            : "Authorized · Step 2: Scan boards to load work";
+          showIdleWorkspace();
+          showWelcomeModal(true);
+        });
       })
       .catch(function (err) {
         if (
@@ -2913,6 +3385,32 @@
       if (event.target && event.target.hasAttribute("data-privacy-close")) {
         closePrivacyModal();
       }
+    });
+  }
+
+  if (els.apiUsageOpenBtn) {
+    els.apiUsageOpenBtn.addEventListener("click", function () {
+      openApiUsageModal();
+    });
+  }
+
+  if (els.apiUsageModalClose) {
+    els.apiUsageModalClose.addEventListener("click", function () {
+      closeApiUsageModal();
+    });
+  }
+
+  if (els.apiUsageModal) {
+    els.apiUsageModal.addEventListener("click", function (event) {
+      if (event.target && event.target.hasAttribute("data-api-usage-close")) {
+        closeApiUsageModal();
+      }
+    });
+  }
+
+  if (els.filterTeam) {
+    els.filterTeam.addEventListener("change", function () {
+      applySelectedTeam(els.filterTeam.value || "");
     });
   }
 
@@ -3191,7 +3689,9 @@
 
   wireMultiSelect(els.filterAssignee, {
     onChangeSummary: function () {
+      state.preferredAssignees = getCheckedValues(els.filterAssignee);
       updateAssigneeSummary();
+      updateAssigneeVisibilityBanner();
     },
   });
   wireMultiSelect(els.filterBoard, {
@@ -3266,6 +3766,11 @@
     }
 
     if (key === "Escape") {
+      if (els.apiUsageModal && !els.apiUsageModal.hidden) {
+        closeApiUsageModal();
+        event.preventDefault();
+        return;
+      }
       if (els.privacyModal && !els.privacyModal.hidden) {
         closePrivacyModal();
         event.preventDefault();

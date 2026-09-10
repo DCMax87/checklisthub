@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Checklist Hub</title>
     <link rel="icon" href="./icons/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./css/dashboard.css?v=20260909b" />
+    <link rel="stylesheet" href="./css/dashboard.css?v=20260910a" />
   </head>
   <body class="dashboard-page">
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -230,6 +230,20 @@
               placeholder="Item, card, or checklist…"
               autocomplete="off"
             />
+          </div>
+          <div class="field">
+            <div class="field-label-block">
+              <label class="field-label" for="filter-team">Team</label>
+            </div>
+            <select id="filter-team" aria-describedby="filter-team-hint">
+              <option value="">None</option>
+            </select>
+            <p id="filter-team-hint" class="field-hint">
+              Teams come from checklists named
+              <code>Checklist Hub Team: …</code> on the board you opened from.
+              Choosing a team sets Assignees and replaces Scan these boards.
+              Group by Assignee to list Unassigned last.
+            </p>
           </div>
           <div class="field">
             <div class="field-label-block">
@@ -596,8 +610,43 @@
         Privacy &amp; data
       </button>
       <span class="footer-sep" aria-hidden="true">·</span>
+      <button type="button" id="api-usage-open-btn" class="linkish footer-privacy-btn">
+        API usage
+      </button>
+      <span class="footer-sep" aria-hidden="true">·</span>
       <span class="footer-note">Read-only · data stays in this browser session</span>
     </footer>
+
+    <div id="api-usage-log" hidden aria-hidden="true"></div>
+
+    <div
+      id="api-usage-modal"
+      class="welcome-modal"
+      hidden
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="api-usage-modal-title"
+    >
+      <div class="welcome-backdrop" data-api-usage-close></div>
+      <div class="welcome-dialog privacy-dialog">
+        <h2 id="api-usage-modal-title">API usage (this session)</h2>
+        <div class="privacy-modal-body">
+          <p class="welcome-lead">
+            Counts Trello rate-limit units for this hub session only (batch URLs
+            count individually). Closing the hub clears the log. Token limit is
+            typically 300 units / 10 seconds.
+          </p>
+          <div id="api-usage-summary" class="api-usage-summary"></div>
+          <div id="api-usage-buckets" class="api-usage-buckets"></div>
+        </div>
+        <div class="welcome-actions">
+          <button type="button" id="api-usage-modal-close" class="btn btn-primary">
+            <span class="material-symbols-outlined" aria-hidden="true">check</span>
+            <span class="btn-label">Got it</span>
+          </button>
+        </div>
+      </div>
+    </div>
 
     <div
       id="privacy-modal"
@@ -719,6 +768,9 @@
         <p class="welcome-lead">
           Three steps: authorize once, scan boards when you open the hub, then
           finish work on the Trello card. Closing the hub clears the list.
+          Optional: open from a board with
+          <code>Checklist Hub Team: …</code> checklists to pick a Team in Filters
+          (sets Assignees and Scan boards).
         </p>
         <div class="welcome-points">
           <div class="welcome-point">
@@ -794,12 +846,12 @@
       </div>
     </div>
 
-    <script src="./config.js?v=20260909a"></script>
+    <script src="./config.js?v=20260910a"></script>
     <script src="https://p.trellocdn.com/power-up.min.js"></script>
-    <script src="./js/cookies.js?v=20260909a"></script>
-    <script src="./js/prefs.js?v=20260909a"></script>
-    <script src="./js/mock-data.js?v=20260909a"></script>
-    <script src="./js/api.js?v=20260909a"></script>
-    <script src="./js/dashboard.js?v=20260909a"></script>
+    <script src="./js/cookies.js?v=20260910a"></script>
+    <script src="./js/prefs.js?v=20260910a"></script>
+    <script src="./js/mock-data.js?v=20260910a"></script>
+    <script src="./js/api.js?v=20260910a"></script>
+    <script src="./js/dashboard.js?v=20260910a"></script>
   </body>
 </html>
