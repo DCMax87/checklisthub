@@ -5,7 +5,7 @@
  * APP_KEY must match the key from your Power-Up's "API key" tab.
  */
 window.CHECKLIST_HUB_CONFIG = {
-  appKey: "YOUR_TRELLO_API_KEY",
+  appKey: "b80f2d51e1b906460bc7ff7166238cba",
   appName: "Checklist Hub",
   appAuthor: "Your Team",
   /** How long cached checklist data is considered fresh (ms). */
