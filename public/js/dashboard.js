@@ -2669,6 +2669,7 @@
     if (!force) {
       if (state.data) return;
       if (state.welcomeSkippedThisSession) return;
+      if (prefsApi.loadPrefs().welcomeDismissed) return;
     }
     closeScanConfirm();
     closePrivacyModal();
