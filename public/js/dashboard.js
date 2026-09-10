@@ -620,26 +620,20 @@
   }
 
   function getSelectedBoardIds() {
-    if (state.selectedTeamId) {
-      var team = findTeamById(state.selectedTeamId);
-      if (team && team.boardIds && team.boardIds.length) {
-        // Prefer live checkbox state when options exist.
-        if (
-          els.filterBoard &&
-          els.filterBoard.querySelectorAll('input[type="checkbox"]').length
-        ) {
-          return getCheckedValues(els.filterBoard);
-        }
-        return team.boardIds.slice();
-      }
-      return [];
-    }
+    // Live checkbox state always wins once the board list exists.
     if (els.filterBoard) {
       var optionCount = els.filterBoard.querySelectorAll(
         'input[type="checkbox"]'
       ).length;
       if (optionCount) {
         return getCheckedValues(els.filterBoard);
+      }
+    }
+    // Before names are listed: fall back to team defaults, then saved picks.
+    if (state.selectedTeamId) {
+      var team = findTeamById(state.selectedTeamId);
+      if (team && team.boardIds && team.boardIds.length) {
+        return team.boardIds.slice();
       }
     }
     var saved = prefsApi.loadPrefs().allowlist || [];
@@ -667,13 +661,14 @@
     var hadOptions =
       els.filterBoard.querySelectorAll('input[type="checkbox"]').length > 0;
     var allowlist = prefsApi.loadPrefs().allowlist || [];
+    var team = state.selectedTeamId ? findTeamById(state.selectedTeamId) : null;
+    var teamBoards =
+      team && team.boardIds && team.boardIds.length ? team.boardIds : null;
     var prefer =
       hadOptions && previous.length
         ? previous
-        : state.selectedTeamId &&
-            findTeamById(state.selectedTeamId) &&
-            findTeamById(state.selectedTeamId).boardIds
-          ? findTeamById(state.selectedTeamId).boardIds
+        : teamBoards
+          ? teamBoards
           : allowlist;
     container.innerHTML = "";
     boards
@@ -1666,7 +1661,11 @@
 
   function renderViews() {
     updateViewChrome();
-    if (!state.data) return;
+    if (!state.data) {
+      // Still sync timeframe chip active state before the first load.
+      updateFocusChips();
+      return;
+    }
 
     var allRows = collectRows();
     var filtered = allRows.filter(matchesFilters).sort(compareItems);
@@ -2090,17 +2089,6 @@
           { dismissible: true, bannerKind: "board-pick" }
         );
       });
-    }
-    if (teamBlocksScan()) {
-      var team = findTeamById(state.selectedTeamId);
-      showBanner(
-        "Team “" +
-          ((team && team.name) || "selected") +
-          "” has no boards set up. Ask an admin to add board links on the team checklist, or choose None.",
-        "info",
-        { dismissible: true }
-      );
-      return Promise.resolve();
     }
     if (!getAllowlistBoardIds().length) {
       showBanner(
@@ -3202,6 +3190,8 @@
   }
 
   function teamBlocksScan() {
+    // Team with no default boards must not block manual Load checklists.
+    // Only the welcome "Load team checklists" shortcut needs team boards.
     var team = findTeamById(state.selectedTeamId);
     if (!team) return false;
     return !(team.boardIds && team.boardIds.length);
@@ -3280,11 +3270,13 @@
           showBanner(
             "Team “" +
               team.name +
-              "” has no boards set up. Ask an admin to add board links on the team checklist, or choose None.",
+              "” has no default boards. Tick boards under Filters → Boards yourself, then Load checklists.",
             "info",
-            { dismissible: true }
+            { dismissible: true, bannerKind: "board-pick" }
           );
-          applyAllowlistBoardIds([]);
+          setConfigOpen(true);
+          // Keep any boards the user already ticked — do not clear them.
+          updateAllowlistSummary();
           return;
         }
         applyAllowlistBoardIds(team.boardIds);
@@ -3722,7 +3714,15 @@
       if (!teamId) return;
       closeWelcomeModal({ skipSession: true });
       applySelectedTeam(teamId).then(function () {
-        if (teamBlocksScan()) return;
+        if (teamBlocksScan() && !getAllowlistBoardIds().length) {
+          showBanner(
+            "This team has no default boards. Tick boards under Filters → Boards, then Load checklists.",
+            "info",
+            { dismissible: true, bannerKind: "board-pick" }
+          );
+          setConfigOpen(true);
+          return;
+        }
         var go = function () {
           runScan({ skipConfirm: true, forceFull: true });
         };
