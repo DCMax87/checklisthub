@@ -258,6 +258,7 @@
                 type="button"
                 class="multi-select-toggle"
                 id="filter-assignee-toggle"
+                aria-haspopup="listbox"
                 aria-expanded="false"
                 aria-controls="filter-assignee-panel"
                 aria-labelledby="filter-assignee-label filter-assignee-summary"
@@ -303,6 +304,7 @@
                 type="button"
                 class="multi-select-toggle"
                 id="filter-board-toggle"
+                aria-haspopup="listbox"
                 aria-expanded="false"
                 aria-controls="filter-board-panel"
                 aria-labelledby="filter-board-label filter-board-summary"
@@ -342,6 +344,7 @@
                 type="button"
                 class="multi-select-toggle"
                 id="filter-label-toggle"
+                aria-haspopup="listbox"
                 aria-expanded="false"
                 aria-controls="filter-label-panel"
                 aria-labelledby="filter-label-label filter-label-summary"
@@ -372,6 +375,7 @@
                 type="button"
                 class="multi-select-toggle"
                 id="filter-list-toggle"
+                aria-haspopup="listbox"
                 aria-expanded="false"
                 aria-controls="filter-list-panel"
                 aria-labelledby="filter-list-label filter-list-summary"
@@ -753,6 +757,7 @@
       role="dialog"
       aria-modal="true"
       aria-labelledby="welcome-title"
+      aria-describedby="welcome-lead"
     >
       <div class="welcome-backdrop" data-welcome-close></div>
       <div class="welcome-dialog">
@@ -762,34 +767,18 @@
           Closing the hub clears the list — load again next time you open it.
         </p>
 
-        <div id="welcome-teams-block" class="welcome-teams" hidden>
-          <label class="field-label" for="welcome-team">Team</label>
-          <select id="welcome-team" aria-describedby="welcome-team-hint">
-            <option value="">None — pick boards yourself</option>
+        <div id="welcome-starter-block" class="welcome-teams" hidden>
+          <label class="field-label" for="welcome-starter">Quick start</label>
+          <select id="welcome-starter" aria-describedby="welcome-starter-hint">
+            <option value="">None — tick boards yourself</option>
           </select>
-          <p id="welcome-team-hint" class="welcome-note">
-            Teams come from <code>Checklist Hub Team: …</code> on this board.
-            Choosing one preselects Boards and assignees, then you can load
-            checklists for just those boards.
+          <p id="welcome-starter-hint" class="welcome-note">
+            Pick a <strong>team</strong> (from this board) or a <strong>saved
+            view</strong>, then load. Or leave None and tick boards under Filters.
           </p>
-          <button type="button" id="welcome-scan-team" class="btn btn-primary" disabled>
-            <span class="material-symbols-outlined" aria-hidden="true">group</span>
-            <span class="btn-label">Load team checklists</span>
-          </button>
-        </div>
-
-        <div id="welcome-views-block" class="welcome-teams" hidden>
-          <label class="field-label" for="welcome-view">Saved view</label>
-          <select id="welcome-view" aria-describedby="welcome-view-hint">
-            <option value="">None</option>
-          </select>
-          <p id="welcome-view-hint" class="welcome-note">
-            Optional alternative to a team — applies your saved filters and board
-            picks, then loads checklists.
-          </p>
-          <button type="button" id="welcome-scan-view" class="btn btn-primary" disabled>
-            <span class="material-symbols-outlined" aria-hidden="true">bookmark</span>
-            <span class="btn-label">Load with this view</span>
+          <button type="button" id="welcome-starter-load" class="btn btn-primary" disabled>
+            <span class="material-symbols-outlined" aria-hidden="true">radar</span>
+            <span class="btn-label">Load checklists</span>
           </button>
         </div>
 

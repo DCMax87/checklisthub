@@ -67,12 +67,9 @@
     welcomeModal: document.getElementById("welcome-modal"),
     welcomeDismiss: document.getElementById("welcome-dismiss"),
     welcomeScan: document.getElementById("welcome-scan"),
-    welcomeScanTeam: document.getElementById("welcome-scan-team"),
-    welcomeTeam: document.getElementById("welcome-team"),
-    welcomeTeamsBlock: document.getElementById("welcome-teams-block"),
-    welcomeViewsBlock: document.getElementById("welcome-views-block"),
-    welcomeView: document.getElementById("welcome-view"),
-    welcomeScanView: document.getElementById("welcome-scan-view"),
+    welcomeStarterBlock: document.getElementById("welcome-starter-block"),
+    welcomeStarter: document.getElementById("welcome-starter"),
+    welcomeStarterLoad: document.getElementById("welcome-starter-load"),
     welcomeLead: document.getElementById("welcome-lead"),
     welcomeHelpBtn: document.getElementById("welcome-help-btn"),
     scanNudge: document.getElementById("scan-nudge"),
@@ -1834,48 +1831,110 @@
     if (current) {
       els.savedViews.value = current;
     }
-    populateWelcomeViews();
+    populateWelcomeStarter();
   }
 
-  function populateWelcomeViews() {
-    if (!els.welcomeView) return;
+  function parseWelcomeStarter(value) {
+    var raw = value || "";
+    if (raw.indexOf("team:") === 0) {
+      return { kind: "team", id: raw.slice(5) };
+    }
+    if (raw.indexOf("view:") === 0) {
+      return { kind: "view", id: raw.slice(5) };
+    }
+    return { kind: "none", id: "" };
+  }
+
+  function populateWelcomeStarter() {
+    if (!els.welcomeStarter) return;
+    var teams = state.teams || [];
     var views = prefsApi.loadViews();
-    var current = els.welcomeView.value || state.pendingViewId || "";
     var defaultId = prefsApi.loadPrefs().defaultViewId || "";
-    els.welcomeView.innerHTML = "";
+    var previous = parseWelcomeStarter(els.welcomeStarter.value);
+    var prefer =
+      previous.kind !== "none"
+        ? previous
+        : state.pendingViewId
+          ? { kind: "view", id: state.pendingViewId }
+          : state.selectedTeamId
+            ? { kind: "team", id: state.selectedTeamId }
+            : { kind: "none", id: "" };
+
+    els.welcomeStarter.innerHTML = "";
     var none = document.createElement("option");
     none.value = "";
-    none.textContent = "None";
-    els.welcomeView.appendChild(none);
-    views.forEach(function (view) {
-      var opt = document.createElement("option");
-      opt.value = view.id;
-      opt.textContent =
-        view.name + (view.id === defaultId ? " (default)" : "");
-      els.welcomeView.appendChild(opt);
-    });
-    if (current && views.some(function (v) { return v.id === current; })) {
-      els.welcomeView.value = current;
+    none.textContent = "None — tick boards yourself";
+    els.welcomeStarter.appendChild(none);
+
+    if (teams.length) {
+      var teamGroup = document.createElement("optgroup");
+      teamGroup.label = "Teams";
+      teams.forEach(function (team) {
+        var opt = document.createElement("option");
+        opt.value = "team:" + team.id;
+        opt.textContent = team.name;
+        teamGroup.appendChild(opt);
+      });
+      els.welcomeStarter.appendChild(teamGroup);
+    }
+
+    if (views.length) {
+      var viewGroup = document.createElement("optgroup");
+      viewGroup.label = "Saved views";
+      views.forEach(function (view) {
+        var opt = document.createElement("option");
+        opt.value = "view:" + view.id;
+        opt.textContent =
+          view.name + (view.id === defaultId ? " (default)" : "");
+        viewGroup.appendChild(opt);
+      });
+      els.welcomeStarter.appendChild(viewGroup);
+    }
+
+    var preferValue =
+      prefer.kind === "team"
+        ? "team:" + prefer.id
+        : prefer.kind === "view"
+          ? "view:" + prefer.id
+          : "";
+    var hasPrefer = false;
+    if (preferValue) {
+      els.welcomeStarter.querySelectorAll("option").forEach(function (opt) {
+        if (opt.value === preferValue) hasPrefer = true;
+      });
+    }
+    els.welcomeStarter.value = hasPrefer ? preferValue : "";
+
+    if (els.welcomeStarterBlock) {
+      els.welcomeStarterBlock.hidden = !(teams.length || views.length);
+    }
+    updateWelcomeStarterLoadButton();
+  }
+
+  function updateWelcomeStarterLoadButton() {
+    if (!els.welcomeStarterLoad) return;
+    var parsed = parseWelcomeStarter(
+      els.welcomeStarter && els.welcomeStarter.value
+    );
+    els.welcomeStarterLoad.disabled = parsed.kind === "none";
+    var label = els.welcomeStarterLoad.querySelector(".btn-label");
+    var icon = els.welcomeStarterLoad.querySelector(
+      ".material-symbols-outlined"
+    );
+    if (parsed.kind === "team") {
+      if (label) label.textContent = "Load team checklists";
+      if (icon) icon.textContent = "group";
+    } else if (parsed.kind === "view") {
+      if (label) label.textContent = "Load with this view";
+      if (icon) icon.textContent = "bookmark";
     } else {
-      els.welcomeView.value = "";
+      if (label) label.textContent = "Load checklists";
+      if (icon) icon.textContent = "radar";
     }
-    if (els.welcomeViewsBlock) {
-      els.welcomeViewsBlock.hidden = !views.length;
-    }
-    updateWelcomeScanViewButton();
   }
 
-  function updateWelcomeScanViewButton() {
-    if (!els.welcomeScanView) return;
-    var viewId =
-      (els.welcomeView && els.welcomeView.value) || state.pendingViewId || "";
-    els.welcomeScanView.disabled = !viewId;
-  }
-
-  function clearWelcomeViewSelection() {
+  function clearWelcomeStarterExtras() {
     state.pendingViewId = "";
-    if (els.welcomeView) els.welcomeView.value = "";
-    updateWelcomeScanViewButton();
   }
 
   function applyPendingOrDefaultView() {
@@ -2245,7 +2304,7 @@
     updateAllowlistSummary();
     syncActionButtons();
     syncWelcomeTeamsUi();
-    populateWelcomeViews();
+    populateWelcomeStarter();
     if (!state.data) {
       setEmptyCopy("pick-boards");
       if (els.emptyState) els.emptyState.hidden = false;
@@ -2675,14 +2734,11 @@
     closePrivacyModal();
     closeApiUsageModal();
     syncWelcomeTeamsUi();
-    populateWelcomeViews();
+    populateWelcomeStarter();
     var focusEl =
-      (els.welcomeTeamsBlock &&
-        !els.welcomeTeamsBlock.hidden &&
-        els.welcomeTeam) ||
-      (els.welcomeViewsBlock &&
-        !els.welcomeViewsBlock.hidden &&
-        els.welcomeView) ||
+      (els.welcomeStarterBlock &&
+        !els.welcomeStarterBlock.hidden &&
+        els.welcomeStarter) ||
       els.welcomeScan ||
       els.welcomeDismiss;
     openModalShell(els.welcomeModal, focusEl);
@@ -2846,12 +2902,8 @@
     (data.members || []).forEach(registerAssigneeMember);
     if (data.me) registerAssigneeMember(data.me);
     populateAllowlistBoards(data.boards);
-    if (state.selectedTeamId) {
-      var team = findTeamById(state.selectedTeamId);
-      if (team && team.boardIds && team.boardIds.length) {
-        applyAllowlistBoardIds(team.boardIds);
-      }
-    }
+    // Keep live board ticks (including boards added after a team was chosen).
+    // Do not reset to team.boardIds here — that wiped unscanned/extra picks after Load.
     populateBoards(data.boards);
     populateLabels(data.labels || []);
     populateLists(data.lists || []);
@@ -3233,36 +3285,31 @@
   }
 
   function populateTeamsSelect(teams) {
-    if (!els.filterTeam && !els.welcomeTeam) return;
+    if (!els.filterTeam) {
+      populateWelcomeStarter();
+      return;
+    }
     var list = teams || [];
     var current =
       (els.filterTeam && els.filterTeam.value) ||
       state.selectedTeamId ||
       "";
 
-    function fillSelect(select, includeNoneLabel) {
-      if (!select) return;
-      select.innerHTML = "";
-      var none = document.createElement("option");
-      none.value = "";
-      none.textContent = includeNoneLabel || "None";
-      select.appendChild(none);
-      list.forEach(function (team) {
-        var opt = document.createElement("option");
-        opt.value = team.id;
-        opt.textContent = team.name;
-        select.appendChild(opt);
-      });
-      if (current && list.some(function (t) { return t.id === current; })) {
-        select.value = current;
-      } else {
-        select.value = "";
-      }
-    }
-
-    fillSelect(els.filterTeam, "None");
-    fillSelect(els.welcomeTeam, "None — pick boards yourself");
-    if (!(current && list.some(function (t) { return t.id === current; }))) {
+    els.filterTeam.innerHTML = "";
+    var none = document.createElement("option");
+    none.value = "";
+    none.textContent = "None";
+    els.filterTeam.appendChild(none);
+    list.forEach(function (team) {
+      var opt = document.createElement("option");
+      opt.value = team.id;
+      opt.textContent = team.name;
+      els.filterTeam.appendChild(opt);
+    });
+    if (current && list.some(function (t) { return t.id === current; })) {
+      els.filterTeam.value = current;
+    } else {
+      els.filterTeam.value = "";
       state.selectedTeamId = "";
     }
     syncWelcomeTeamsUi();
@@ -3271,37 +3318,23 @@
   function syncWelcomeTeamsUi() {
     var hasTeams = state.teams && state.teams.length > 0;
     var hasViews = prefsApi.loadViews().length > 0;
-    if (els.welcomeTeamsBlock) {
-      els.welcomeTeamsBlock.hidden = !hasTeams;
-    }
-    if (els.welcomeViewsBlock) {
-      els.welcomeViewsBlock.hidden = !hasViews;
-    }
+    populateWelcomeStarter();
     if (els.welcomeLead) {
       if (!state.boardsReady) {
-        if (hasTeams && hasViews) {
+        if (hasTeams || hasViews) {
           els.welcomeLead.textContent =
-            "Listing boards… Pick a team or a saved view for a faster start.";
-        } else if (hasTeams) {
-          els.welcomeLead.textContent =
-            "Listing boards… or Load team checklists once a team is selected.";
-        } else if (hasViews) {
-          els.welcomeLead.textContent =
-            "Listing boards… or pick a saved view to reuse your board picks.";
+            "Listing boards… Use Quick start for a team or saved view, or tick boards yourself.";
         } else {
           els.welcomeLead.textContent =
             "Listing available boards… then tick Boards and Load checklists.";
         }
       } else if (hasTeams || hasViews) {
         els.welcomeLead.textContent =
-          "Pick a team or saved view, or tick Boards yourself, then Load checklists.";
+          "Use Quick start, or tick Boards yourself, then Load checklists.";
       } else {
         els.welcomeLead.textContent =
           "Tick boards under Filters → Boards, then Load checklists. Day to day, prefer Update status.";
       }
-    }
-    if (els.welcomeTeam && els.filterTeam) {
-      els.welcomeTeam.value = els.filterTeam.value || "";
     }
     if (els.welcomeScan) {
       var scanLabel = els.welcomeScan.querySelector(".btn-label");
@@ -3317,15 +3350,11 @@
           "Load checklist items from the boards ticked under Filters → Boards";
       }
     }
-    updateWelcomeScanTeamButton();
-    updateWelcomeScanViewButton();
+    updateWelcomeStarterLoadButton();
   }
 
   function updateWelcomeScanTeamButton() {
-    if (!els.welcomeScanTeam) return;
-    var teamId =
-      (els.welcomeTeam && els.welcomeTeam.value) || state.selectedTeamId || "";
-    els.welcomeScanTeam.disabled = !teamId;
+    updateWelcomeStarterLoadButton();
   }
 
   function findTeamById(id) {
@@ -3832,10 +3861,11 @@
 
   if (els.welcomeScan) {
     els.welcomeScan.addEventListener("click", function () {
-      if (els.welcomeTeam) els.welcomeTeam.value = "";
       if (els.filterTeam) els.filterTeam.value = "";
       state.selectedTeamId = "";
-      clearWelcomeViewSelection();
+      clearWelcomeStarterExtras();
+      if (els.welcomeStarter) els.welcomeStarter.value = "";
+      updateWelcomeStarterLoadButton();
       closeWelcomeModal({ skipSession: true });
       if (!state.boardsReady) {
         loadBoardList();
@@ -3845,94 +3875,83 @@
     });
   }
 
-  if (els.welcomeTeam) {
-    els.welcomeTeam.addEventListener("change", function () {
-      var teamId = els.welcomeTeam.value || "";
-      if (els.filterTeam) els.filterTeam.value = teamId;
-      updateWelcomeScanTeamButton();
-      if (!teamId) {
+  if (els.welcomeStarter) {
+    els.welcomeStarter.addEventListener("change", function () {
+      var parsed = parseWelcomeStarter(els.welcomeStarter.value);
+      updateWelcomeStarterLoadButton();
+      if (parsed.kind === "none") {
         state.selectedTeamId = "";
+        if (els.filterTeam) els.filterTeam.value = "";
+        clearWelcomeStarterExtras();
         return;
       }
-      // Team and saved view are alternative starters.
-      clearWelcomeViewSelection();
-      applySelectedTeam(teamId).then(function () {
-        updateWelcomeScanTeamButton();
-      });
+      if (parsed.kind === "team") {
+        clearWelcomeStarterExtras();
+        if (els.filterTeam) els.filterTeam.value = parsed.id;
+        applySelectedTeam(parsed.id).then(function () {
+          updateWelcomeStarterLoadButton();
+        });
+        return;
+      }
+      if (parsed.kind === "view") {
+        if (els.filterTeam) els.filterTeam.value = "";
+        state.selectedTeamId = "";
+        state.pendingViewId = parsed.id;
+        state.applyDefaultViewPending = false;
+        applyViewBoardPicks(findSavedView(parsed.id));
+        updateWelcomeStarterLoadButton();
+      }
     });
   }
 
-  if (els.welcomeScanTeam) {
-    els.welcomeScanTeam.addEventListener("click", function () {
-      var teamId =
-        (els.welcomeTeam && els.welcomeTeam.value) ||
-        state.selectedTeamId ||
-        "";
-      if (!teamId) return;
-      clearWelcomeViewSelection();
-      closeWelcomeModal({ skipSession: true });
-      applySelectedTeam(teamId).then(function () {
-        if (teamBlocksScan() && !getAllowlistBoardIds().length) {
-          showBanner(
-            "This team has no default boards. Tick boards under Filters → Boards, then Load checklists.",
-            "info",
-            { dismissible: true, bannerKind: "board-pick" }
-          );
-          setConfigOpen(true);
-          return;
-        }
-        var go = function () {
+  if (els.welcomeStarterLoad) {
+    els.welcomeStarterLoad.addEventListener("click", function () {
+      var parsed = parseWelcomeStarter(
+        els.welcomeStarter && els.welcomeStarter.value
+      );
+      if (parsed.kind === "none") return;
+
+      if (parsed.kind === "team") {
+        closeWelcomeModal({ skipSession: true });
+        applySelectedTeam(parsed.id).then(function () {
+          if (teamBlocksScan() && !getAllowlistBoardIds().length) {
+            showBanner(
+              "This team has no default boards. Tick boards under Filters → Boards, then Load checklists.",
+              "info",
+              { dismissible: true, bannerKind: "board-pick" }
+            );
+            setConfigOpen(true);
+            return;
+          }
+          var goTeam = function () {
+            runScan({ skipConfirm: true, forceFull: true });
+          };
+          if (!state.boardsReady) {
+            return loadBoardList({ silent: true }).then(goTeam);
+          }
+          goTeam();
+        });
+        return;
+      }
+
+      if (parsed.kind === "view") {
+        if (els.filterTeam) els.filterTeam.value = "";
+        state.selectedTeamId = "";
+        state.pendingViewId = parsed.id;
+        state.applyDefaultViewPending = false;
+        applyViewBoardPicks(findSavedView(parsed.id));
+        closeWelcomeModal({ skipSession: true });
+        var goView = function () {
           runScan({ skipConfirm: true, forceFull: true });
         };
         if (!state.boardsReady) {
-          return loadBoardList({ silent: true }).then(go);
+          return loadBoardList({ silent: true }).then(function () {
+            applyViewBoardPicks(findSavedView(parsed.id));
+            goView();
+          });
         }
-        go();
-      });
-    });
-  }
-
-  if (els.welcomeView) {
-    els.welcomeView.addEventListener("change", function () {
-      var viewId = els.welcomeView.value || "";
-      updateWelcomeScanViewButton();
-      if (!viewId) {
-        state.pendingViewId = "";
-        return;
+        goView();
       }
-      // Saved view and team are alternative starters.
-      if (els.welcomeTeam) els.welcomeTeam.value = "";
-      if (els.filterTeam) els.filterTeam.value = "";
-      state.selectedTeamId = "";
-      state.pendingViewId = viewId;
-      state.applyDefaultViewPending = false;
-      applyViewBoardPicks(findSavedView(viewId));
-      updateWelcomeScanViewButton();
-    });
-  }
-
-  if (els.welcomeScanView) {
-    els.welcomeScanView.addEventListener("click", function () {
-      var viewId =
-        (els.welcomeView && els.welcomeView.value) || state.pendingViewId || "";
-      if (!viewId) return;
-      if (els.welcomeTeam) els.welcomeTeam.value = "";
-      if (els.filterTeam) els.filterTeam.value = "";
-      state.selectedTeamId = "";
-      state.pendingViewId = viewId;
-      state.applyDefaultViewPending = false;
-      applyViewBoardPicks(findSavedView(viewId));
-      closeWelcomeModal({ skipSession: true });
-      var go = function () {
-        runScan({ skipConfirm: true, forceFull: true });
-      };
-      if (!state.boardsReady) {
-        return loadBoardList({ silent: true }).then(function () {
-          applyViewBoardPicks(findSavedView(viewId));
-          go();
-        });
-      }
-      go();
     });
   }
 
@@ -4028,8 +4047,14 @@
   if (els.filterTeam) {
     els.filterTeam.addEventListener("change", function () {
       var teamId = els.filterTeam.value || "";
-      if (els.welcomeTeam) els.welcomeTeam.value = teamId;
-      updateWelcomeScanTeamButton();
+      if (teamId) {
+        clearWelcomeStarterExtras();
+        if (els.welcomeStarter) els.welcomeStarter.value = "team:" + teamId;
+      } else if (els.welcomeStarter) {
+        var parsed = parseWelcomeStarter(els.welcomeStarter.value);
+        if (parsed.kind === "team") els.welcomeStarter.value = "";
+      }
+      updateWelcomeStarterLoadButton();
       applySelectedTeam(teamId);
     });
   }

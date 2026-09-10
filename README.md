@@ -15,6 +15,7 @@ Consolidates checklist items (and member cards without checklist tasks) across b
 - Board button: **Checklist Hub**
 - Single **Boards** picker (tick to include / show; prefs remembered in cookies)
 - Saved views + optional default view; teams from `Checklist Hub Team: …` checklists
+- Welcome **Quick start** (team or saved view) when available
 - Undated queue + member cards with no checklist tasks
 - List grouping + calendar
 - Clear actions: **List boards** (names) → **Load checklists** (items) → **Update status** (known items)
@@ -102,12 +103,14 @@ Tip: enable on one hub board (teams are read from that board); **Load checklists
 ## Using it
 
 1. Click **Checklist Hub** (each open starts empty — boards list automatically; press **Load checklists** after ticking boards)
-2. Optional starters on welcome: **Team** or **Saved view**
+2. Optional welcome **Quick start**: pick a **team** or **saved view**, or tick boards yourself
 3. Default filter: **Assigned to me** + **Incomplete**
 4. Change filters as needed; click or press Enter/Space on column headers to sort
 5. Open a card in Trello to complete work (the hub is read-only)
 6. Day to day: **Update status** refreshes items you already have  
 7. When you need newly assigned work or newly ticked boards: **Load checklists**
+
+For workspace setup (team checklists, views, hub board), see **[ADMIN.md](./ADMIN.md)**.
 
 ## Rate limits (admin)
 
