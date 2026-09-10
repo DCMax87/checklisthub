@@ -43,6 +43,9 @@
     bannerDetails: document.getElementById("banner-details"),
     bannerTechnical: document.getElementById("banner-technical"),
     bannerCopy: document.getElementById("banner-copy"),
+    bannerActions: document.getElementById("banner-actions"),
+    bannerActionBtn: document.getElementById("banner-action-btn"),
+    bannerActionLabel: document.getElementById("banner-action-label"),
     stageBar: document.getElementById("stage-bar"),
     emptyState: document.getElementById("empty-state"),
     tableWrap: document.getElementById("table-wrap"),
@@ -142,6 +145,7 @@
     boardsReady: false,
     boardCatalog: null,
     allowlistRescanNeeded: false,
+    bannerAction: null,
     teams: [],
     selectedTeamId: "",
     preferredAssignees: null,
@@ -261,6 +265,8 @@
       if (els.bannerText) els.bannerText.textContent = "";
       else els.banner.textContent = "";
       if (els.bannerDismiss) els.bannerDismiss.hidden = true;
+      if (els.bannerActions) els.bannerActions.hidden = true;
+      state.bannerAction = null;
       if (els.bannerDetails) {
         els.bannerDetails.hidden = true;
         els.bannerDetails.open = false;
@@ -286,6 +292,20 @@
     }
     if (els.bannerDismiss) {
       els.bannerDismiss.hidden = !opts.dismissible;
+    }
+    if (els.bannerActions && els.bannerActionBtn) {
+      if (opts.actionLabel && opts.action) {
+        els.bannerActions.hidden = false;
+        if (els.bannerActionLabel) {
+          els.bannerActionLabel.textContent = opts.actionLabel;
+        } else {
+          els.bannerActionBtn.textContent = opts.actionLabel;
+        }
+        state.bannerAction = opts.action;
+      } else {
+        els.bannerActions.hidden = true;
+        state.bannerAction = null;
+      }
     }
     if (els.bannerDetails && els.bannerTechnical) {
       if (opts.technical) {
@@ -2275,10 +2295,26 @@
     var missing = boardsMissingFromScan();
     state.allowlistRescanNeeded = missing.length > 0;
     if (state.allowlistRescanNeeded) {
+      var missingCount = missing.length;
       showBanner(
-        "You ticked boards that are not in this list yet. Press Load checklists to pull their items (this does not refresh board names).",
+        "You ticked " +
+          missingCount +
+          " board" +
+          (missingCount === 1 ? "" : "s") +
+          " that " +
+          (missingCount === 1 ? "is" : "are") +
+          " not in this list yet. Load checklists to pull " +
+          (missingCount === 1 ? "its" : "their") +
+          " items (board names stay as they are).",
         "info",
-        { dismissible: true, bannerKind: "allowlist-rescan" }
+        {
+          dismissible: true,
+          bannerKind: "allowlist-rescan",
+          actionLabel: "Load checklists",
+          action: function () {
+            runScan({ skipConfirm: true, forceFull: true });
+          },
+        }
       );
     } else if (
       els.banner &&
@@ -3631,6 +3667,13 @@
         savePrefs({ privacyBannerDismissed: true });
       }
       showBanner(null);
+    });
+  }
+
+  if (els.bannerActionBtn) {
+    els.bannerActionBtn.addEventListener("click", function () {
+      var action = state.bannerAction;
+      if (typeof action === "function") action();
     });
   }
 

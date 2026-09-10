@@ -1540,6 +1540,25 @@ input[type="text"]:focus-visible,
   padding: 0;
 }
 
+.banner-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.banner-actions[hidden] {
+  display: none !important;
+}
+
+.banner-action {
+  white-space: nowrap;
+}
+
+.banner-action .material-symbols-outlined {
+  font-size: 1.1rem;
+}
+
 .banner-error {
   border-color: #fecdca;
   background: #fef3f2;
