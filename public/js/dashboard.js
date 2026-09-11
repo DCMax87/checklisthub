@@ -84,6 +84,11 @@
     scanConfirmModal: document.getElementById("scan-confirm-modal"),
     scanConfirmOk: document.getElementById("scan-confirm-ok"),
     scanConfirmCancel: document.getElementById("scan-confirm-cancel"),
+    loadBlockedModal: document.getElementById("load-blocked-modal"),
+    loadBlockedTitle: document.getElementById("load-blocked-title"),
+    loadBlockedLead: document.getElementById("load-blocked-lead"),
+    loadBlockedDismiss: document.getElementById("load-blocked-dismiss"),
+    loadBlockedFilters: document.getElementById("load-blocked-filters"),
     defaultViewBtn: document.getElementById("default-view-btn"),
     privacyModal: document.getElementById("privacy-modal"),
     privacyOpenBtn: document.getElementById("privacy-open-btn"),
@@ -433,16 +438,20 @@
       : 0;
     if (!boardOptionCount) {
       return {
+        title: "No boards available",
         message:
-          "No boards are available. Refresh the board list under Filters → Boards, then try again.",
+          "No boards are available to load. Refresh the board list under Filters → Boards, then try again.",
         openFilters: true,
+        modal: true,
       };
     }
     if (!getAllowlistBoardIds().length) {
       return {
+        title: "No boards selected",
         message:
-          "No boards selected — Load boards has nothing to pull. Tick at least one board under Filters → Boards, then try again.",
+          "Load boards has nothing to pull. Tick at least one board under Filters → Boards, then try again.",
         openFilters: true,
+        modal: true,
       };
     }
     return null;
@@ -450,6 +459,10 @@
 
   function warnLoadBlocked(blocker) {
     if (!blocker) return;
+    if (blocker.modal) {
+      openLoadBlockedModal(blocker);
+      return;
+    }
     showBanner(blocker.message, "warn", {
       dismissible: true,
       bannerKind: "load-blocked",
@@ -2476,6 +2489,7 @@
 
   function beginScan() {
     closeScanConfirm();
+    closeLoadBlockedModal();
     closeWelcomeModal({ persist: true, skipSession: true });
     closeSyncMenu();
     var blocker = getLoadChecklistsBlocker();
@@ -2881,6 +2895,9 @@
     if (els.scanConfirmModal && !els.scanConfirmModal.hidden) {
       return els.scanConfirmModal;
     }
+    if (els.loadBlockedModal && !els.loadBlockedModal.hidden) {
+      return els.loadBlockedModal;
+    }
     if (els.privacyModal && !els.privacyModal.hidden) return els.privacyModal;
     if (els.apiUsageModal && !els.apiUsageModal.hidden) return els.apiUsageModal;
     return null;
@@ -2942,6 +2959,7 @@
       if (prefsApi.loadPrefs().welcomeDismissed) return;
     }
     closeScanConfirm();
+    closeLoadBlockedModal();
     closePrivacyModal();
     closeApiUsageModal();
     syncWelcomeTeamsUi();
@@ -2977,6 +2995,7 @@
     }
     closePrivacyModal();
     closeApiUsageModal();
+    closeLoadBlockedModal();
     openModalShell(els.scanConfirmModal, els.scanConfirmOk);
   }
 
@@ -2988,10 +3007,44 @@
     }
   }
 
+  function openLoadBlockedModal(blocker) {
+    if (!els.loadBlockedModal) {
+      showBanner(blocker.message, "warn", {
+        dismissible: true,
+        bannerKind: "load-blocked",
+      });
+      if (blocker.openFilters) setConfigOpen(true);
+      return;
+    }
+    closeWelcomeModal({ skipSession: true });
+    closeScanConfirm();
+    closePrivacyModal();
+    closeApiUsageModal();
+    if (els.loadBlockedTitle) {
+      els.loadBlockedTitle.textContent = blocker.title || "Can't load boards";
+    }
+    if (els.loadBlockedLead) {
+      els.loadBlockedLead.textContent = blocker.message || "";
+    }
+    openModalShell(
+      els.loadBlockedModal,
+      els.loadBlockedFilters || els.loadBlockedDismiss
+    );
+  }
+
+  function closeLoadBlockedModal() {
+    if (els.loadBlockedModal) els.loadBlockedModal.hidden = true;
+    if (noOtherModalOpen()) {
+      document.body.classList.remove("welcome-open");
+      restoreModalFocus();
+    }
+  }
+
   function openPrivacyModal() {
     if (!els.privacyModal) return;
     closeWelcomeModal();
     closeScanConfirm();
+    closeLoadBlockedModal();
     closeApiUsageModal();
     openModalShell(
       els.privacyModal,
@@ -3529,6 +3582,7 @@
     return (
       (!els.welcomeModal || els.welcomeModal.hidden) &&
       (!els.scanConfirmModal || els.scanConfirmModal.hidden) &&
+      (!els.loadBlockedModal || els.loadBlockedModal.hidden) &&
       (!els.privacyModal || els.privacyModal.hidden) &&
       (!els.apiUsageModal || els.apiUsageModal.hidden)
     );
@@ -3856,6 +3910,7 @@
     if (!els.apiUsageModal) return;
     closeWelcomeModal();
     closeScanConfirm();
+    closeLoadBlockedModal();
     closePrivacyModal();
     renderApiUsageModal();
     openModalShell(
@@ -4183,9 +4238,11 @@
         applySelectedTeam(parsed.id).then(function () {
           if (teamBlocksScan() && !getAllowlistBoardIds().length) {
             warnLoadBlocked({
+              title: "No boards for this team",
               message:
                 "This team has no default boards. Tick boards under Filters → Boards, then Load boards.",
               openFilters: true,
+              modal: true,
             });
             return;
           }
@@ -4258,6 +4315,30 @@
         event.target.hasAttribute("data-scan-confirm-close")
       ) {
         closeScanConfirm();
+      }
+    });
+  }
+
+  if (els.loadBlockedDismiss) {
+    els.loadBlockedDismiss.addEventListener("click", function () {
+      closeLoadBlockedModal();
+    });
+  }
+
+  if (els.loadBlockedFilters) {
+    els.loadBlockedFilters.addEventListener("click", function () {
+      closeLoadBlockedModal();
+      setConfigOpen(true);
+    });
+  }
+
+  if (els.loadBlockedModal) {
+    els.loadBlockedModal.addEventListener("click", function (event) {
+      if (
+        event.target &&
+        event.target.hasAttribute("data-load-blocked-close")
+      ) {
+        closeLoadBlockedModal();
       }
     });
   }
@@ -4698,6 +4779,11 @@
       }
       if (els.scanConfirmModal && !els.scanConfirmModal.hidden) {
         closeScanConfirm();
+        event.preventDefault();
+        return;
+      }
+      if (els.loadBlockedModal && !els.loadBlockedModal.hidden) {
+        closeLoadBlockedModal();
         event.preventDefault();
         return;
       }

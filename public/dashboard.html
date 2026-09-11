@@ -842,12 +842,41 @@
       </div>
     </div>
 
+    <div
+      id="load-blocked-modal"
+      class="welcome-modal"
+      hidden
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="load-blocked-title"
+      aria-describedby="load-blocked-lead"
+    >
+      <div class="welcome-backdrop" data-load-blocked-close></div>
+      <div class="welcome-dialog">
+        <h2 id="load-blocked-title">No boards selected</h2>
+        <p class="welcome-lead" id="load-blocked-lead">
+          Load boards has nothing to pull. Tick at least one board under
+          <strong>Filters → Boards</strong>, then try again.
+        </p>
+        <div class="welcome-actions">
+          <button type="button" id="load-blocked-dismiss" class="btn btn-ghost">
+            <span class="material-symbols-outlined" aria-hidden="true">close</span>
+            <span class="btn-label">OK</span>
+          </button>
+          <button type="button" id="load-blocked-filters" class="btn btn-primary">
+            <span class="material-symbols-outlined" aria-hidden="true">tune</span>
+            <span class="btn-label">Open Filters</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <script src="./config.js?v=20260910b"></script>
     <script src="https://p.trellocdn.com/power-up.min.js"></script>
     <script src="./js/cookies.js?v=20260910a"></script>
     <script src="./js/prefs.js?v=20260911b"></script>
     <script src="./js/mock-data.js?v=20260911f"></script>
     <script src="./js/api.js?v=20260911e"></script>
-    <script src="./js/dashboard.js?v=20260911f"></script>
+    <script src="./js/dashboard.js?v=20260911g"></script>
   </body>
 </html>

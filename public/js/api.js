@@ -216,21 +216,35 @@
       list_fields: "id,name",
       cards: "visible",
       card_fields:
-        "id,name,shortUrl,url,idList,idMembers,due,dueComplete,dueReminder,closed,labels",
+        "id,name,shortUrl,url,idList,idMembers,due,dueComplete,dueReminder,closed,labels,badges",
       checklists: "all",
-      checkItem_fields: "name,state,due,dueReminder,idMember,pos",
+      // Board nested checklists may omit items under load; we also refetch
+      // /checklists when badges/items look incomplete (see loadBoardsBundle).
+      checkItems: "all",
+      checkItem_fields: "all",
     });
     return "/boards/" + boardId + "?" + q.toString();
+  }
+
+  function boardChecklistsRoute(boardId) {
+    const q = new URLSearchParams({
+      cards: "visible",
+      checkItems: "all",
+      checkItem_fields: "all",
+      fields: "id,name,idCard,pos",
+    });
+    return "/boards/" + boardId + "/checklists?" + q.toString();
   }
 
   function boardCardsRoute(boardId) {
     const q = new URLSearchParams({
       filter: "visible",
       fields:
-        "id,name,shortUrl,url,idList,idMembers,due,dueComplete,dueReminder,closed,labels",
+        "id,name,shortUrl,url,idList,idMembers,due,dueComplete,dueReminder,closed,labels,badges",
       checklists: "all",
       checklist_fields: "id,name",
-      checkItem_fields: "name,state,due,dueReminder,idMember,pos",
+      checkItems: "all",
+      checkItem_fields: "all",
     });
     return "/boards/" + boardId + "/cards?" + q.toString();
   }
@@ -408,6 +422,13 @@
     return data;
   }
 
+  function normalizeMemberId(value) {
+    if (value == null || value === "") return null;
+    const s = String(value);
+    if (s === "null" || s === "undefined") return null;
+    return s;
+  }
+
   function pushCheckItem(
     items,
     board,
@@ -418,7 +439,8 @@
     listNameById
   ) {
     if (isTeamConfigChecklist(checklist && checklist.name)) return;
-    const memberId = checkItem.idMember || null;
+    if (!checkItem || !checkItem.id) return;
+    const memberId = normalizeMemberId(checkItem.idMember);
     const memberIds = (card && card.idMembers) || [];
     items.push({
       kind: "checkitem",
@@ -450,10 +472,13 @@
 
   function flattenBoard(board, cards, membersById, listNameById) {
     const items = [];
+    const seen = {};
     (cards || []).forEach(function (card) {
       (card.checklists || []).forEach(function (checklist) {
         if (isTeamConfigChecklist(checklist.name)) return;
         (checklist.checkItems || []).forEach(function (checkItem) {
+          if (!checkItem || !checkItem.id || seen[checkItem.id]) return;
+          seen[checkItem.id] = true;
           pushCheckItem(
             items,
             board,
@@ -472,7 +497,7 @@
   function flattenFromBoardPayload(board, payload, membersById) {
     const cardsById = {};
     (payload.cards || []).forEach(function (card) {
-      cardsById[card.id] = card;
+      if (card && card.id) cardsById[card.id] = card;
     });
 
     const listNameById = {};
@@ -480,30 +505,15 @@
       if (list && list.id) listNameById[list.id] = list.name || "";
     });
 
-    const checklistSource =
-      payload.checklists && payload.checklists.length
-        ? payload.checklists
-            .filter(function (checklist) {
-              return !isTeamConfigChecklist(checklist.name);
-            })
-            .map(function (checklist) {
-              return {
-                checklist: checklist,
-                card: cardsById[checklist.idCard] || {},
-              };
-            })
-        : [];
-
-    if (!checklistSource.length) {
-      return flattenBoard(board, payload.cards || [], membersById, listNameById);
-    }
-
     const items = [];
-    checklistSource.forEach(function (entry) {
-      const checklist = entry.checklist;
-      const card = entry.card;
+    const seen = {};
+
+    function addChecklist(checklist, card) {
+      if (!checklist || isTeamConfigChecklist(checklist.name)) return;
       if (!card || !card.id) return;
       (checklist.checkItems || []).forEach(function (checkItem) {
+        if (!checkItem || !checkItem.id || seen[checkItem.id]) return;
+        seen[checkItem.id] = true;
         pushCheckItem(
           items,
           board,
@@ -514,7 +524,20 @@
           listNameById
         );
       });
+    }
+
+    // Board-level checklists (typical for GET /boards/{id}?checklists=all).
+    (payload.checklists || []).forEach(function (checklist) {
+      addChecklist(checklist, cardsById[checklist.idCard]);
     });
+
+    // Also read checklists nested under cards (fallback /cards?checklists=all).
+    (payload.cards || []).forEach(function (card) {
+      (card.checklists || []).forEach(function (checklist) {
+        addChecklist(checklist, card);
+      });
+    });
+
     return items;
   }
 
@@ -642,17 +665,20 @@
     membersById,
     listNameById
   ) {
+    const myId = normalizeMemberId(meId);
+    if (!myId) return [];
+
     const cardIdsWithMyTasks = {};
     items.forEach(function (item) {
-      if (item.idMember === meId && item.cardId) {
+      if (normalizeMemberId(item.idMember) === myId && item.cardId) {
         cardIdsWithMyTasks[item.cardId] = true;
       }
     });
 
     const out = [];
     (cards || []).forEach(function (card) {
-      const memberIds = card.idMembers || [];
-      if (memberIds.indexOf(meId) === -1) return;
+      const memberIds = (card.idMembers || []).map(normalizeMemberId);
+      if (memberIds.indexOf(myId) === -1) return;
       if (cardIdsWithMyTasks[card.id]) return;
 
       out.push({
@@ -663,9 +689,9 @@
         due: card.due || null,
         dueReminder: parseDueReminderMinutes(card.dueReminder),
         dueComplete: Boolean(card.dueComplete),
-        idMember: meId,
+        idMember: myId,
         assigneeName:
-          (membersById[meId] && membersById[meId].fullName) || "You",
+          (membersById[myId] && membersById[myId].fullName) || "You",
         checklistId: null,
         checklistName: "Card membership · no checklist tasks for you",
         cardId: card.id,
@@ -677,7 +703,7 @@
         listName: listNameFromMaps(card, listNameById),
         labels: normalizeCardLabels(card),
         pos: 0,
-        idMembers: memberIds,
+        idMembers: (card.idMembers || []).slice(),
         cardClosed: Boolean(card.closed),
       });
     });
@@ -688,6 +714,38 @@
     // Nested board GET succeeded when the cards array is present (may be empty).
     // Boards with cards but no checklists are valid and must not trigger fallback.
     return Boolean(payload && Array.isArray(payload.cards));
+  }
+
+  function countPayloadCheckItems(payload) {
+    let n = 0;
+    ((payload && payload.checklists) || []).forEach(function (checklist) {
+      n += ((checklist && checklist.checkItems) || []).length;
+    });
+    ((payload && payload.cards) || []).forEach(function (card) {
+      ((card && card.checklists) || []).forEach(function (checklist) {
+        n += ((checklist && checklist.checkItems) || []).length;
+      });
+    });
+    return n;
+  }
+
+  function payloadSuggestsMissingCheckItems(payload) {
+    if (!payload || !Array.isArray(payload.cards)) return false;
+    const checklists = payload.checklists || [];
+    // Nested board responses sometimes return checklist shells without a
+    // checkItems array even when checkItems=all was requested.
+    if (
+      checklists.some(function (checklist) {
+        return checklist && !Array.isArray(checklist.checkItems);
+      })
+    ) {
+      return true;
+    }
+    if (countPayloadCheckItems(payload) > 0) return false;
+    return payload.cards.some(function (card) {
+      const badges = card && card.badges;
+      return badges && Number(badges.checkItems) > 0;
+    });
   }
 
   async function fetchBatch(routes, token, options) {
@@ -850,6 +908,53 @@
       const payload = nestedPayloads[board.id];
       return !payloadLooksComplete(payload);
     });
+
+    const needsChecklistRefetch = boards.filter(function (board) {
+      if (
+        boardErrors.some(function (err) {
+          return err.boardId === board.id;
+        })
+      ) {
+        return false;
+      }
+      if (needsFallback.some(function (b) {
+        return b.id === board.id;
+      })) {
+        return false;
+      }
+      return payloadSuggestsMissingCheckItems(nestedPayloads[board.id]);
+    });
+
+    if (needsChecklistRefetch.length) {
+      const checklistChunks = chunk(
+        needsChecklistRefetch.map(function (board) {
+          return boardChecklistsRoute(board.id);
+        }),
+        BATCH_SIZE
+      );
+      for (let i = 0; i < checklistChunks.length; i += 1) {
+        assertNotAborted(signal);
+        const batch = await fetchBatch(checklistChunks[i], token, {
+          signal: signal,
+          label: "checklists",
+        });
+        httpCalls += 1;
+        nestedUnits += checklistChunks[i].length;
+
+        checklistChunks[i].forEach(function (route, idx) {
+          const path = route.split("?")[0];
+          const boardId = path.replace(/^\/boards\//, "").replace(
+            /\/checklists$/,
+            ""
+          );
+          const status = batchItemStatus(batch[idx]);
+          if (!status.ok || !status.data) return;
+          const payload = nestedPayloads[boardId];
+          if (!payload) return;
+          payload.checklists = status.data || [];
+        });
+      }
+    }
 
     if (needsFallback.length) {
       const fallbackRoutes = [];
@@ -1125,7 +1230,8 @@
           "id,name,due,dueComplete,dueReminder,closed,idMembers,shortUrl,url,idList,labels",
         checklists: "all",
         checklist_fields: "id,name",
-        checkItem_fields: "name,state,due,dueReminder,idMember,pos",
+        checkItems: "all",
+        checkItem_fields: "all",
       }).toString()
     );
   }
