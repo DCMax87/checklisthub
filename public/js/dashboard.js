@@ -53,6 +53,7 @@
     filterAssignee: document.getElementById("filter-assignee"),
     filterStatus: document.getElementById("filter-status"),
     filterDue: document.getElementById("filter-due"),
+    filterReminders: document.getElementById("filter-reminders"),
     filterBoard: document.getElementById("filter-board"),
     filterLabel: document.getElementById("filter-label"),
     filterList: document.getElementById("filter-list"),
@@ -117,6 +118,7 @@
     groupBy: prefs.groupBy || "due",
     view: prefs.view || "list",
     workType: prefs.workType || "both",
+    showReminders: Boolean(prefs.showReminders),
     density: prefs.density === "compact" ? "compact" : "comfortable",
     groupPageSize:
       prefs.groupPageSize === 0
@@ -163,6 +165,9 @@
   if (els.filterWorkType) {
     els.filterWorkType.value = state.workType;
   }
+  if (els.filterReminders) {
+    els.filterReminders.value = state.showReminders ? "show" : "hide";
+  }
 
   function startOfMonth(date) {
     return new Date(date.getFullYear(), date.getMonth(), 1);
@@ -184,6 +189,7 @@
     if (patch.groupBy != null) state.groupBy = next.groupBy;
     if (patch.view != null) state.view = next.view;
     if (patch.workType != null) state.workType = next.workType;
+    if (patch.showReminders != null) state.showReminders = next.showReminders;
     if (patch.density != null) state.density = next.density;
     if (patch.groupPageSize != null) state.groupPageSize = next.groupPageSize;
     if (patch.collapsedGroups != null) {
@@ -449,12 +455,53 @@
   }
 
   function itemState(item) {
+    if (item.kind === "reminder") {
+      return item.state || "incomplete";
+    }
     if (item.kind === "card") {
       if (item.dueComplete) return "complete";
       return item.state || "incomplete";
     }
     if (item.cardClosed || item.cardDueComplete) return "complete";
     return item.state || "incomplete";
+  }
+
+  /** Master Reminders toggle is on. */
+  function remindersEnabled() {
+    return Boolean(state.showReminders);
+  }
+
+  /**
+   * Whether reminder rows should appear in the current view.
+   * Calendar: anytime Show is on. List: only when time-framed.
+   */
+  function remindersVisible() {
+    if (!remindersEnabled()) return false;
+    if (state.view === "calendar") return true;
+    if (state.groupBy === "due") return true;
+    if (state.groupBy === "none" && state.sortKey === "due") return true;
+    var due = els.filterDue ? els.filterDue.value : "all";
+    return (
+      due === "myday" ||
+      due === "today" ||
+      due === "overdue" ||
+      due === "week"
+    );
+  }
+
+  function isReminderRow(item) {
+    return Boolean(item && (item.kind === "reminder" || item.isReminder));
+  }
+
+  function countReminderSplit(items) {
+    var reminderCount = 0;
+    (items || []).forEach(function (item) {
+      if (isReminderRow(item)) reminderCount += 1;
+    });
+    return {
+      real: (items || []).length - reminderCount,
+      reminders: reminderCount,
+    };
   }
 
   function registerAssigneeMember(member) {
@@ -852,6 +899,8 @@
   }
 
   function matchesFilters(item) {
+    if (isReminderRow(item) && !remindersVisible()) return false;
+
     var people = selectedPeopleIds();
     var boards = getCheckedValues(els.filterBoard);
     var status = els.filterStatus.value;
@@ -958,7 +1007,11 @@
         item.assigneeName,
         item.listName,
         labelNames,
-        item.kind === "card" ? "card member" : "checklist task",
+        item.kind === "card"
+          ? "card member"
+          : item.kind === "reminder"
+            ? "reminder"
+            : "checklist task",
       ]
         .join(" ")
         .toLowerCase();
@@ -1065,6 +1118,10 @@
 
     if (av < bv) return state.sortDir === "asc" ? -1 : 1;
     if (av > bv) return state.sortDir === "asc" ? 1 : -1;
+    // Same due/sort key: real work before reminder clones.
+    var aRem = isReminderRow(a);
+    var bRem = isReminderRow(b);
+    if (aRem !== bRem) return aRem ? 1 : -1;
     return (a.name || "").localeCompare(b.name || "");
   }
 
@@ -1172,6 +1229,7 @@
   }
 
   function typeLabel(item) {
+    if (isReminderRow(item)) return "Reminder";
     return item.kind === "card" ? "Card" : "Task";
   }
 
@@ -1196,11 +1254,15 @@
     var tr = document.createElement("tr");
     var rowState = itemState(item);
     if (rowState === "complete") tr.classList.add("is-complete");
+    if (isReminderRow(item)) tr.classList.add("is-reminder");
 
     var typeTd = document.createElement("td");
     typeTd.className = "col-type";
     var pill = document.createElement("span");
-    pill.className = "type-pill" + (item.kind === "card" ? " is-card" : "");
+    pill.className =
+      "type-pill" +
+      (item.kind === "card" ? " is-card" : "") +
+      (isReminderRow(item) ? " is-reminder" : "");
     pill.textContent = typeLabel(item);
     typeTd.appendChild(pill);
 
@@ -1221,7 +1283,13 @@
     }
     var meta = document.createElement("div");
     meta.className = "item-meta";
-    meta.textContent = item.checklistName || "";
+    if (isReminderRow(item)) {
+      meta.textContent =
+        "Due " +
+        (item.sourceDue ? formatDue(item.sourceDue) : formatDue(item.due));
+    } else {
+      meta.textContent = item.checklistName || "";
+    }
     nameTd.appendChild(nameWrap);
     nameTd.appendChild(meta);
     var mobileBits = [];
@@ -1315,7 +1383,11 @@
     if (!els.focusChips) return;
     var dueValue = els.filterDue.value;
     els.filterDue.value = "all";
-    var pool = collectRows().filter(matchesFilters);
+    var pool = collectRows()
+      .filter(matchesFilters)
+      .filter(function (item) {
+        return !isReminderRow(item);
+      });
     els.filterDue.value = dueValue;
 
     var counts = { overdue: 0, today: 0, week: 0, myday: 0 };
@@ -1496,6 +1568,20 @@
       if (dayItems.length) cell.classList.add("has-items");
       if (isExpanded) cell.classList.add("is-expanded");
 
+      var daySplit = countReminderSplit(dayItems);
+      var countText = daySplit.reminders
+        ? daySplit.real + " · " + daySplit.reminders + "r"
+        : String(daySplit.real);
+      var ariaCount =
+        daySplit.real +
+        (daySplit.real === 1 ? " task" : " tasks") +
+        (daySplit.reminders
+          ? ", " +
+            daySplit.reminders +
+            " reminder" +
+            (daySplit.reminders === 1 ? "" : "s")
+          : "");
+
       cell.setAttribute("role", "button");
       cell.setAttribute("tabindex", "0");
       cell.setAttribute("data-day-key", key);
@@ -1511,8 +1597,7 @@
           day: "numeric",
         }) +
           ", " +
-          dayItems.length +
-          (dayItems.length === 1 ? " task" : " tasks") +
+          ariaCount +
           ". " +
           (isExpanded ? "Activate to collapse." : "Activate to expand.")
       );
@@ -1525,7 +1610,7 @@
       if (dayItems.length) {
         var countBadge = document.createElement("span");
         countBadge.className = "cal-day-count";
-        countBadge.textContent = String(dayItems.length);
+        countBadge.textContent = countText;
         heading.appendChild(countBadge);
       }
       var chevron = document.createElement("span");
@@ -1541,7 +1626,8 @@
         node.className =
           "cal-item" +
           (dueBucket(item).id === "overdue" ? " is-overdue" : "") +
-          (itemState(item) === "complete" ? " is-complete" : "");
+          (itemState(item) === "complete" ? " is-complete" : "") +
+          (isReminderRow(item) ? " is-reminder" : "");
         var dot = document.createElement("span");
         dot.className = "cal-item-dot";
         dot.style.backgroundColor =
@@ -1550,7 +1636,11 @@
         var text = document.createElement("span");
         text.className = "cal-item-text";
         text.textContent =
-          (item.kind === "card" ? "Card · " : "") + item.name;
+          (isReminderRow(item)
+            ? "Reminder · "
+            : item.kind === "card"
+              ? "Card · "
+              : "") + item.name;
         node.appendChild(dot);
         node.appendChild(text);
         node.title =
@@ -1691,16 +1781,24 @@
     var allRows = collectRows();
     var filtered = allRows.filter(matchesFilters).sort(compareItems);
     var overdue = filtered.filter(function (item) {
-      return dueBucket(item).id === "overdue";
+      return !isReminderRow(item) && dueBucket(item).id === "overdue";
     }).length;
+    var split = countReminderSplit(filtered);
+    var realLoaded = countReminderSplit(allRows).real;
 
     els.resultCount.textContent =
-      filtered.length +
+      split.real +
       " item" +
-      (filtered.length === 1 ? "" : "s") +
+      (split.real === 1 ? "" : "s") +
+      (split.reminders
+        ? " · " +
+          split.reminders +
+          " reminder" +
+          (split.reminders === 1 ? "" : "s")
+        : "") +
       (overdue ? " · " + overdue + " overdue" : "") +
       " · " +
-      allRows.length +
+      realLoaded +
       " total loaded";
 
     updateFocusChips();
@@ -1747,9 +1845,29 @@
           '<span class="group-count"></span>';
         btn.querySelector(".group-label").textContent = group.label;
         var limit = visibleCountForGroup(group.id, group.items.length);
-        var countLabel = group.items.length + (group.items.length === 1 ? " item" : " items");
+        var split = countReminderSplit(group.items);
+        var countLabel =
+          split.real +
+          (split.real === 1 ? " item" : " items") +
+          (split.reminders
+            ? " · " +
+              split.reminders +
+              " reminder" +
+              (split.reminders === 1 ? "" : "s")
+            : "");
         if (state.groupPageSize && limit < group.items.length) {
-          countLabel = "showing " + limit + " of " + group.items.length;
+          countLabel =
+            "showing " +
+            limit +
+            " of " +
+            group.items.length +
+            (split.reminders
+              ? " (" +
+                split.real +
+                " · " +
+                split.reminders +
+                "r)"
+              : "");
         }
         btn.querySelector(".group-count").textContent = countLabel;
         btn.addEventListener("click", function () {
@@ -2006,6 +2124,7 @@
       labels: els.filterLabel ? getCheckedValues(els.filterLabel) : [],
       lists: els.filterList ? getCheckedValues(els.filterList) : [],
       search: els.filterSearch.value || "",
+      showReminders: state.showReminders,
     };
   }
 
@@ -2045,8 +2164,12 @@
     state.view = view.view || "list";
     state.sortKey = view.sortKey || "due";
     state.sortDir = view.sortDir === "desc" ? "desc" : "asc";
+    state.showReminders = Boolean(view.showReminders);
     state.collapsedGroups = Object.assign({}, view.collapsedGroups || {});
     if (els.filterWorkType) els.filterWorkType.value = state.workType;
+    if (els.filterReminders) {
+      els.filterReminders.value = state.showReminders ? "show" : "hide";
+    }
     els.filterStatus.value = view.status || "incomplete";
     els.filterDue.value = view.due || "all";
     if (els.filterGroup) els.filterGroup.value = state.groupBy;
@@ -2074,6 +2197,7 @@
       sortKey: state.sortKey,
       sortDir: state.sortDir,
       collapsedGroups: state.collapsedGroups,
+      showReminders: state.showReminders,
     });
     renderTable();
   }
@@ -2118,6 +2242,7 @@
         els.filterStatus.value === "incomplete" ? "Open" : "Complete"
       );
     }
+    if (state.showReminders) bits.push("Reminders");
     if (els.filterDue.value !== "all" && state.view !== "calendar") {
       var dueLabels = {
         myday: "My day",
@@ -2897,6 +3022,12 @@
 
   function applyDataset(data, options) {
     var opts = options || {};
+    if (
+      window.ChecklistHubApi &&
+      typeof window.ChecklistHubApi.withRemindersExpanded === "function"
+    ) {
+      data = window.ChecklistHubApi.withRemindersExpanded(data);
+    }
     state.data = data;
     resetGroupVisibleCounts();
     (data.members || []).forEach(registerAssigneeMember);
@@ -3765,6 +3896,14 @@
     });
   }
 
+  if (els.filterReminders) {
+    els.filterReminders.addEventListener("change", function () {
+      state.showReminders = els.filterReminders.value === "show";
+      savePrefs({ showReminders: state.showReminders });
+      renderTable();
+    });
+  }
+
   els.filterSearch.addEventListener("input", function () {
     if (state.searchTimer) clearTimeout(state.searchTimer);
     state.searchTimer = setTimeout(function () {
@@ -4236,7 +4375,12 @@
 
   function exportFilteredCsv() {
     if (!state.data) return;
-    var rows = collectRows().filter(matchesFilters).sort(compareItems);
+    var rows = collectRows()
+      .filter(matchesFilters)
+      .filter(function (item) {
+        return !isReminderRow(item);
+      })
+      .sort(compareItems);
     var header = [
       "Type",
       "Title",

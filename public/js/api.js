@@ -216,9 +216,9 @@
       list_fields: "id,name",
       cards: "visible",
       card_fields:
-        "id,name,shortUrl,url,idList,idMembers,due,dueComplete,closed,labels",
+        "id,name,shortUrl,url,idList,idMembers,due,dueComplete,dueReminder,closed,labels",
       checklists: "all",
-      checkItem_fields: "name,state,due,idMember,pos",
+      checkItem_fields: "name,state,due,dueReminder,idMember,pos",
     });
     return "/boards/" + boardId + "?" + q.toString();
   }
@@ -227,10 +227,10 @@
     const q = new URLSearchParams({
       filter: "visible",
       fields:
-        "id,name,shortUrl,url,idList,idMembers,due,dueComplete,closed,labels",
+        "id,name,shortUrl,url,idList,idMembers,due,dueComplete,dueReminder,closed,labels",
       checklists: "all",
       checklist_fields: "id,name",
-      checkItem_fields: "name,state,due,idMember,pos",
+      checkItem_fields: "name,state,due,dueReminder,idMember,pos",
     });
     return "/boards/" + boardId + "/cards?" + q.toString();
   }
@@ -317,6 +317,97 @@
     return result.ok ? result.data : null;
   }
 
+  function parseDueReminderMinutes(value) {
+    if (value == null || value === "") return null;
+    const n = Number(value);
+    if (!isFinite(n) || n < 0) return null;
+    return n;
+  }
+
+  function startOfLocalDay(date) {
+    return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  }
+
+  function dateKeyLocal(date) {
+    const y = date.getFullYear();
+    let m = String(date.getMonth() + 1);
+    if (m.length < 2) m = "0" + m;
+    let d = String(date.getDate());
+    if (d.length < 2) d = "0" + d;
+    return y + "-" + m + "-" + d;
+  }
+
+  /** Whole calendar days before due that get reminder rows (0 = no synthetic rows). */
+  function reminderLeadDayCount(minutes) {
+    if (minutes == null || minutes < 1440) return 0;
+    return Math.floor(minutes / 1440);
+  }
+
+  function stripReminderRows(list) {
+    return (list || []).filter(function (item) {
+      return item && item.kind !== "reminder";
+    });
+  }
+
+  function baseItemId(id) {
+    return String(id || "").replace(/#reminder-.*$/, "");
+  }
+
+  function cloneReminderRow(item, leadDate) {
+    const key = dateKeyLocal(leadDate);
+    const dueAt = new Date(
+      leadDate.getFullYear(),
+      leadDate.getMonth(),
+      leadDate.getDate(),
+      12,
+      0,
+      0
+    );
+    const sourceKind =
+      item.kind === "reminder" ? item.sourceKind : item.kind;
+    return Object.assign({}, item, {
+      kind: "reminder",
+      id: baseItemId(item.id) + "#reminder-" + key,
+      due: dueAt.toISOString(),
+      sourceDue: item.sourceDue || item.due,
+      sourceKind: sourceKind || "checkitem",
+      isReminder: true,
+      state: "incomplete",
+      dueReminder: item.dueReminder,
+    });
+  }
+
+  function expandReminderRows(baseItems) {
+    const out = [];
+    const today = startOfLocalDay(new Date()).getTime();
+    (baseItems || []).forEach(function (item) {
+      if (!item || item.kind === "reminder") return;
+      out.push(item);
+      if (item.state === "complete") return;
+      if (item.cardClosed || item.closed) return;
+      if (!item.due) return;
+      const days = reminderLeadDayCount(
+        parseDueReminderMinutes(item.dueReminder)
+      );
+      if (!days) return;
+      const dueDay = startOfLocalDay(new Date(item.due));
+      for (let d = days; d >= 1; d -= 1) {
+        const lead = new Date(dueDay.getTime());
+        lead.setDate(lead.getDate() - d);
+        if (lead.getTime() < today) continue;
+        out.push(cloneReminderRow(item, lead));
+      }
+    });
+    return out;
+  }
+
+  function withRemindersExpanded(data) {
+    if (!data) return data;
+    data.items = expandReminderRows(stripReminderRows(data.items));
+    data.memberCards = expandReminderRows(stripReminderRows(data.memberCards));
+    return data;
+  }
+
   function pushCheckItem(
     items,
     board,
@@ -335,6 +426,7 @@
       name: checkItem.name,
       state: effectiveCheckItemState(checkItem, card),
       due: checkItem.due || null,
+      dueReminder: parseDueReminderMinutes(checkItem.dueReminder),
       idMember: memberId,
       assigneeName: memberId
         ? (membersById[memberId] && membersById[memberId].fullName) || "Unknown"
@@ -569,6 +661,7 @@
         name: card.name,
         state: card.dueComplete ? "complete" : "incomplete",
         due: card.due || null,
+        dueReminder: parseDueReminderMinutes(card.dueReminder),
         dueComplete: Boolean(card.dueComplete),
         idMember: meId,
         assigneeName:
@@ -585,6 +678,7 @@
         labels: normalizeCardLabels(card),
         pos: 0,
         idMembers: memberIds,
+        cardClosed: Boolean(card.closed),
       });
     });
     return out;
@@ -895,7 +989,7 @@
       });
     });
 
-    return {
+    return withRemindersExpanded({
       fetchedAt: Date.now(),
       me: me,
       boards: allBoards,
@@ -932,7 +1026,7 @@
         strategy:
           "allowlist-aware scan; /batch nested board GETs; in-memory only while open",
       },
-    };
+    });
   }
 
   async function loadBoardCatalog(token, options) {
@@ -1009,7 +1103,7 @@
       cached.fetchedAt &&
       Date.now() - cached.fetchedAt < ttl
     ) {
-      return { data: cached, fromCache: true };
+      return { data: withRemindersExpanded(cached), fromCache: true };
     }
 
     const data = await loadBoardsBundle(token, {
@@ -1028,10 +1122,10 @@
       "?" +
       new URLSearchParams({
         fields:
-          "id,name,due,dueComplete,closed,idMembers,shortUrl,url,idList,labels",
+          "id,name,due,dueComplete,dueReminder,closed,idMembers,shortUrl,url,idList,labels",
         checklists: "all",
         checklist_fields: "id,name",
-        checkItem_fields: "name,state,due,idMember,pos",
+        checkItem_fields: "name,state,due,dueReminder,idMember,pos",
       }).toString()
     );
   }
@@ -1149,6 +1243,7 @@
           name: checkItem.name,
           state: effectiveCheckItemState(checkItem, fresh),
           due: checkItem.due || null,
+          dueReminder: parseDueReminderMinutes(checkItem.dueReminder),
           idMember: memberId,
           assigneeName: memberId
             ? (membersById[memberId] && membersById[memberId].fullName) ||
@@ -1173,7 +1268,7 @@
     });
 
     const previousOnCard = (source.items || []).filter(function (item) {
-      return item.cardId === cardId;
+      return item.cardId === cardId && item.kind !== "reminder";
     });
     const prevById = {};
     previousOnCard.forEach(function (item) {
@@ -1188,6 +1283,7 @@
       if (
         prev.state !== item.state ||
         prev.due !== item.due ||
+        prev.dueReminder !== item.dueReminder ||
         prev.idMember !== item.idMember ||
         prev.name !== item.name
       ) {
@@ -1216,7 +1312,7 @@
 
     const memberIds = fresh.idMembers || [];
     const existingMemberCard = (source.memberCards || []).find(function (card) {
-      return card.cardId === cardId;
+      return card.cardId === cardId && card.kind !== "reminder";
     });
     const hasMyCheckitem = retainedItems.some(function (item) {
       return meId && item.idMember === meId;
@@ -1233,6 +1329,8 @@
       if (
         existingMemberCard.state !== nextState ||
         existingMemberCard.due !== (fresh.due || null) ||
+        existingMemberCard.dueReminder !==
+          parseDueReminderMinutes(fresh.dueReminder) ||
         existingMemberCard.name !== fresh.name
       ) {
         updated += 1;
@@ -1243,6 +1341,7 @@
         name: fresh.name,
         state: nextState,
         due: fresh.due || null,
+        dueReminder: parseDueReminderMinutes(fresh.dueReminder),
         dueComplete: Boolean(fresh.dueComplete),
         idMember: meId,
         assigneeName:
@@ -1259,6 +1358,7 @@
         labels: normalizeCardLabels(fresh),
         pos: 0,
         idMembers: memberIds,
+        cardClosed: Boolean(fresh.closed),
       });
     } else if (existingMemberCard) {
       removed += 1;
@@ -1307,12 +1407,17 @@
       });
     }
 
+    // Work from base rows only; re-expand reminders after the refresh.
+    source.items = stripReminderRows(source.items);
+    source.memberCards = stripReminderRows(source.memberCards);
+
     const onlyIncomplete = opts.onlyIncomplete !== false;
     const openItems = (source.items || []).filter(function (item) {
-      if (item.kind === "card") return false;
+      if (item.kind === "card" || item.kind === "reminder") return false;
       return onlyIncomplete ? item.state === "incomplete" : true;
     });
     const openMemberCards = (source.memberCards || []).filter(function (card) {
+      if (card.kind === "reminder") return false;
       return onlyIncomplete ? card.state === "incomplete" : true;
     });
 
@@ -1333,6 +1438,7 @@
 
     if (!uniqueCards.length) {
       source.statusSyncedAt = Date.now();
+      withRemindersExpanded(source);
       writeCache(source);
       return {
         data: source,
@@ -1395,18 +1501,21 @@
       mergeBoardSlice(source, slice);
       // Status-only: drop brand-new rows Scan would be needed to discover.
       let droppedAdds = 0;
-      source.items = (source.items || []).filter(function (item) {
+      source.items = stripReminderRows(source.items).filter(function (item) {
         if (!boardIdSet[item.boardId]) return true;
         if (knownItemIds[item.id]) return true;
         droppedAdds += 1;
         return false;
       });
-      source.memberCards = (source.memberCards || []).filter(function (card) {
-        if (!boardIdSet[card.boardId]) return true;
-        if (knownMemberCardIds[card.id]) return true;
-        droppedAdds += 1;
-        return false;
-      });
+      source.memberCards = stripReminderRows(source.memberCards).filter(
+        function (card) {
+          if (!boardIdSet[card.boardId]) return true;
+          if (knownMemberCardIds[card.id]) return true;
+          droppedAdds += 1;
+          return false;
+        }
+      );
+      withRemindersExpanded(source);
       writeCache(source);
       return {
         data: source,
@@ -1466,6 +1575,7 @@
     }
 
     source.statusSyncedAt = Date.now();
+    withRemindersExpanded(source);
     writeCache(source);
 
     return {
@@ -1511,6 +1621,7 @@
     refreshKnownMemberCards: refreshKnownMemberCards,
     clearCache: clearCache,
     readCache: readCache,
+    withRemindersExpanded: withRemindersExpanded,
     loadTeamConfig: loadTeamConfig,
     resolveBoardShortLinks: resolveBoardShortLinks,
     parseTeamsFromBoardPayload: parseTeamsFromBoardPayload,

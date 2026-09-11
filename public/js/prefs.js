@@ -26,6 +26,7 @@
       privacyBannerDismissed: false,
       welcomeDismissed: false,
       defaultViewId: "",
+      showReminders: false,
     };
   }
 
@@ -51,6 +52,7 @@
       privacyBannerDismissed: Boolean(next.privacyBannerDismissed),
       welcomeDismissed: Boolean(next.welcomeDismissed),
       defaultViewId: String(next.defaultViewId || "").slice(0, 40),
+      showReminders: Boolean(next.showReminders),
     };
     cookies.writeJson(PREFS_COOKIE, safe, 180);
     return safe;
@@ -79,6 +81,7 @@
         labels: (view.labels || []).slice(0, 40),
         lists: (view.lists || []).slice(0, 40),
         search: String(view.search || "").slice(0, 80),
+        showReminders: Boolean(view.showReminders),
       };
     });
     cookies.writeJson(VIEWS_COOKIE, compact, 180);

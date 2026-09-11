@@ -67,6 +67,7 @@
       name: "Update status page copy",
       state: "incomplete",
       due: daysFromNow(3),
+      dueReminder: 2880,
       idMember: me.id,
       assigneeName: me.fullName,
       checklistId: "cl-3",
@@ -84,6 +85,7 @@
       name: "QA checkout flow on staging",
       state: "incomplete",
       due: daysFromNow(1),
+      dueReminder: 60,
       idMember: "member-sam",
       assigneeName: "Sam Okonkwo",
       checklistId: "cl-4",
@@ -169,6 +171,7 @@
       name: "Send launch email draft to legal",
       state: "incomplete",
       due: daysFromNow(2),
+      dueReminder: 20160,
       idMember: me.id,
       assigneeName: me.fullName,
       checklistId: "cl-2",
@@ -342,6 +345,7 @@
       name: "Stakeholder map workshop",
       state: "incomplete",
       due: daysFromNow(4),
+      dueReminder: 2880,
       dueComplete: false,
       idMember: me.id,
       assigneeName: me.fullName,
@@ -495,7 +499,7 @@
         return next;
       }
 
-      return {
+      var dataset = {
         fetchedAt: Date.now(),
         me: me,
         boards: boards.slice(),
@@ -510,6 +514,13 @@
           return enrich(card, index + items.length);
         }),
       };
+      if (
+        global.ChecklistHubApi &&
+        typeof global.ChecklistHubApi.withRemindersExpanded === "function"
+      ) {
+        return global.ChecklistHubApi.withRemindersExpanded(dataset);
+      }
+      return dataset;
     },
 
     getDemoTeams: function () {
