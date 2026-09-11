@@ -320,12 +320,48 @@ h2 {
 
 .focus-chips {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 .focus-chips[hidden] {
   display: none;
+}
+
+.focus-tools {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.focus-search {
+  flex: 0 1 200px;
+  min-width: 120px;
+  max-width: 240px;
+}
+
+.focus-search input[type="search"] {
+  width: 100%;
+  box-sizing: border-box;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 300;
+}
+
+.focus-search input[type="search"]:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
 }
 
 .chip {
@@ -400,6 +436,12 @@ h2 {
   grid-column: span 3;
 }
 
+.config-panel .field-team,
+.config-panel .field-assignee,
+.config-panel .field-board {
+  grid-column: span 4;
+}
+
 .config-panel .field-label-block {
   display: flex;
   flex-direction: column;
@@ -428,22 +470,66 @@ h2 {
   letter-spacing: 0;
 }
 
-.config-panel .field-search {
-  grid-column: span 3;
+.config-details {
+  grid-column: 1 / -1;
+  border: 1px solid rgba(44, 42, 41, 0.12);
+  background: rgba(255, 255, 255, 0.45);
+  padding: 0;
 }
 
-/* Team + Assignees + Boards + Labels + Lists (+ Saved) */
-.config-panel .field:nth-child(6),
-.config-panel .field:nth-child(7),
-.config-panel .field:nth-child(8),
-.config-panel .field:nth-child(9),
-.config-panel .field:nth-child(10),
-.config-panel .field:nth-child(11) {
-  grid-column: span 4;
+.config-details > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 0.7rem 0.85rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  user-select: none;
+}
+
+.config-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+.config-details > summary::before {
+  content: "";
+  display: inline-block;
+  width: 0;
+  height: 0;
+  margin-right: 0.55rem;
+  border-top: 0.28rem solid transparent;
+  border-bottom: 0.28rem solid transparent;
+  border-left: 0.4rem solid var(--muted);
+  vertical-align: 0.05rem;
+}
+
+.config-details[open] > summary::before {
+  border-left-color: transparent;
+  border-right: 0.28rem solid transparent;
+  border-left: 0.28rem solid transparent;
+  border-top: 0.4rem solid var(--muted);
+  vertical-align: 0.1rem;
+}
+
+.config-details-body {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 12px 14px;
+  padding: 0 0.85rem 0.85rem;
+}
+
+.config-details-body > .field {
+  grid-column: span 6;
 }
 
 .config-panel .field-saved {
   grid-column: 1 / -1;
+}
+
+.config-panel .field-saved .config-details-body {
+  display: block;
 }
 
 .config-panel #filter-team-hint {
@@ -613,17 +699,23 @@ h2 {
   }
 
   .config-panel .field,
-  .config-panel .field-search,
-  .config-panel .field:nth-child(5),
-  .config-panel .field:nth-child(6),
-  .config-panel .field:nth-child(7),
-  .config-panel .field:nth-child(8),
-  .config-panel .field:nth-child(9) {
+  .config-panel .field-team,
+  .config-panel .field-assignee,
+  .config-panel .field-board {
     grid-column: span 1;
   }
 
+  .config-details,
   .config-panel .field-saved {
     grid-column: 1 / -1;
+  }
+
+  .config-details-body {
+    grid-template-columns: 1fr;
+  }
+
+  .config-details-body > .field {
+    grid-column: span 1;
   }
 
   .config-panel .field-saved .saved-views {
@@ -663,14 +755,16 @@ h2 {
   }
 
   .config-panel .field,
-  .config-panel .field-search,
-  .config-panel .field:nth-child(5),
-  .config-panel .field:nth-child(6),
-  .config-panel .field:nth-child(7),
-  .config-panel .field:nth-child(8),
-  .config-panel .field:nth-child(9),
+  .config-panel .field-team,
+  .config-panel .field-assignee,
+  .config-panel .field-board,
+  .config-details,
   .config-panel .field-saved {
     grid-column: 1 / -1;
+  }
+
+  .config-details-body {
+    grid-template-columns: 1fr;
   }
 
   .config-panel .field-saved .saved-views {
@@ -1346,8 +1440,9 @@ input[type="text"]:focus-visible,
 
 .focus-chips {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
+  flex-shrink: 0;
 }
 
 .focus-chips[hidden] {
@@ -1486,10 +1581,32 @@ input[type="text"]:focus-visible,
 
 .stage-bar-controls {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 10px 14px;
   flex-shrink: 0;
   margin-left: auto;
+}
+
+.stage-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 400;
+  color: var(--ink);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.stage-check input {
+  width: 0.95rem;
+  height: 0.95rem;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .stage-bar .group-field {
@@ -1598,6 +1715,12 @@ input[type="text"]:focus-visible,
   border-color: #fecdca;
   background: #fef3f2;
   color: var(--danger);
+}
+
+.banner-warn {
+  border-color: #f9dbaf;
+  background: #fffaeb;
+  color: var(--warn);
 }
 
 .banner-info {

@@ -523,6 +523,15 @@
       return dataset;
     },
 
+    /** Board catalog for List boards (demo) — names only, no checklist expansion required. */
+    getDataset: function () {
+      return {
+        me: me,
+        boards: boards.slice(),
+        members: members.slice(),
+      };
+    },
+
     getDemoTeams: function () {
       return [
         {

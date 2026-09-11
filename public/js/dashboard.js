@@ -51,7 +51,7 @@
     tableWrap: document.getElementById("table-wrap"),
     itemsBody: document.getElementById("items-body"),
     filterAssignee: document.getElementById("filter-assignee"),
-    filterStatus: document.getElementById("filter-status"),
+    filterHideCompleted: document.getElementById("filter-hide-completed"),
     filterDue: document.getElementById("filter-due"),
     filterReminders: document.getElementById("filter-reminders"),
     filterBoard: document.getElementById("filter-board"),
@@ -119,6 +119,7 @@
     view: prefs.view || "list",
     workType: prefs.workType || "both",
     showReminders: Boolean(prefs.showReminders),
+    hideCompleted: prefs.hideCompleted !== false,
     density: prefs.density === "compact" ? "compact" : "comfortable",
     groupPageSize:
       prefs.groupPageSize === 0
@@ -166,7 +167,10 @@
     els.filterWorkType.value = state.workType;
   }
   if (els.filterReminders) {
-    els.filterReminders.value = state.showReminders ? "show" : "hide";
+    els.filterReminders.checked = state.showReminders;
+  }
+  if (els.filterHideCompleted) {
+    els.filterHideCompleted.checked = state.hideCompleted;
   }
 
   function startOfMonth(date) {
@@ -190,6 +194,7 @@
     if (patch.view != null) state.view = next.view;
     if (patch.workType != null) state.workType = next.workType;
     if (patch.showReminders != null) state.showReminders = next.showReminders;
+    if (patch.hideCompleted != null) state.hideCompleted = next.hideCompleted;
     if (patch.density != null) state.density = next.density;
     if (patch.groupPageSize != null) state.groupPageSize = next.groupPageSize;
     if (patch.collapsedGroups != null) {
@@ -285,7 +290,7 @@
     els.banner.hidden = false;
     els.banner.className = "banner" + (kind ? " banner-" + kind : "");
     els.banner.setAttribute("data-banner-kind", opts.bannerKind || kind || "info");
-    if (kind === "error") {
+    if (kind === "error" || kind === "warn") {
       els.banner.setAttribute("role", "alert");
       els.banner.setAttribute("aria-live", "assertive");
     } else {
@@ -391,6 +396,67 @@
     });
   }
 
+  /**
+   * Why Load boards cannot start right now (or null if it can).
+   * Covers boards, auth, in-flight work, and config — not post-load filters.
+   */
+  function getLoadChecklistsBlocker() {
+    if (state.loading) {
+      return {
+        message:
+          "Already working — wait for the current load to finish, or press Cancel.",
+        openFilters: false,
+      };
+    }
+    if (!state.demo && !state.token) {
+      return {
+        message: "Authorize with Trello before you Load boards.",
+        openFilters: false,
+      };
+    }
+    if (!state.demo && !isApiKeyConfigured()) {
+      return {
+        message:
+          "API key is not set in config.js, so Load boards cannot talk to Trello.",
+        openFilters: false,
+      };
+    }
+    if (!state.boardsReady) {
+      return {
+        message:
+          "Board names are still loading. Wait a moment, then tick boards under Filters → Boards and press Load boards.",
+        openFilters: true,
+      };
+    }
+    var boardOptionCount = els.filterBoard
+      ? els.filterBoard.querySelectorAll('input[type="checkbox"]').length
+      : 0;
+    if (!boardOptionCount) {
+      return {
+        message:
+          "No boards are available. Refresh the board list under Filters → Boards, then try again.",
+        openFilters: true,
+      };
+    }
+    if (!getAllowlistBoardIds().length) {
+      return {
+        message:
+          "No boards selected — Load boards has nothing to pull. Tick at least one board under Filters → Boards, then try again.",
+        openFilters: true,
+      };
+    }
+    return null;
+  }
+
+  function warnLoadBlocked(blocker) {
+    if (!blocker) return;
+    showBanner(blocker.message, "warn", {
+      dismissible: true,
+      bannerKind: "load-blocked",
+    });
+    if (blocker.openFilters) setConfigOpen(true);
+  }
+
   function clearNonPrivacyBanner() {
     if (
       els.bannerDismiss &&
@@ -473,7 +539,8 @@
 
   /**
    * Whether reminder rows should appear in the current view.
-   * Calendar: anytime Show is on. List: only when time-framed.
+   * Calendar: anytime Show is on. List: only when time-framed;
+   * individual rows are further limited to today/tomorrow lead days.
    */
   function remindersVisible() {
     if (!remindersEnabled()) return false;
@@ -481,12 +548,15 @@
     if (state.groupBy === "due") return true;
     if (state.groupBy === "none" && state.sortKey === "due") return true;
     var due = els.filterDue ? els.filterDue.value : "all";
-    return (
-      due === "myday" ||
-      due === "today" ||
-      due === "overdue" ||
-      due === "week"
-    );
+    return due === "myday" || due === "today" || due === "tomorrow";
+  }
+
+  /** List reminders only land in Due today / Due tomorrow (not week/later). */
+  function reminderAllowedInList(item) {
+    if (!isReminderRow(item)) return true;
+    if (state.view === "calendar") return true;
+    var bucket = dueBucket(item).id;
+    return bucket === "today" || bucket === "tomorrow";
   }
 
   function isReminderRow(item) {
@@ -688,7 +758,8 @@
   }
 
   function getSelectedBoardIds() {
-    // Live checkbox state always wins once the board list exists.
+    // Live checkbox state always wins once the board list exists —
+    // including an empty selection (never fall back to “all” / saved picks).
     if (els.filterBoard) {
       var optionCount = els.filterBoard.querySelectorAll(
         'input[type="checkbox"]'
@@ -732,12 +803,13 @@
     var team = state.selectedTeamId ? findTeamById(state.selectedTeamId) : null;
     var teamBoards =
       team && team.boardIds && team.boardIds.length ? team.boardIds : null;
-    var prefer =
-      hadOptions && previous.length
-        ? previous
-        : teamBoards
-          ? teamBoards
-          : allowlist;
+    // If the board list was already shown, keep the current ticks — including none.
+    // Only seed from team/saved prefs on the first populate.
+    var prefer = hadOptions
+      ? previous
+      : teamBoards
+        ? teamBoards
+        : allowlist;
     container.innerHTML = "";
     boards
       .slice()
@@ -899,11 +971,13 @@
   }
 
   function matchesFilters(item) {
-    if (isReminderRow(item) && !remindersVisible()) return false;
+    if (isReminderRow(item)) {
+      if (!remindersVisible()) return false;
+      if (!reminderAllowedInList(item)) return false;
+    }
 
     var people = selectedPeopleIds();
     var boards = getCheckedValues(els.filterBoard);
-    var status = els.filterStatus.value;
     var due = els.filterDue.value;
     var q = (els.filterSearch.value || "").trim().toLowerCase();
     var rowState = itemState(item);
@@ -932,8 +1006,7 @@
       if (boards.indexOf(item.boardId) === -1) return false;
     }
 
-    if (status === "incomplete" && rowState !== "incomplete") return false;
-    if (status === "complete" && rowState !== "complete") return false;
+    if (state.hideCompleted && rowState !== "incomplete") return false;
 
     var labels = els.filterLabel ? getCheckedValues(els.filterLabel) : [];
     if (labels.length) {
@@ -977,15 +1050,17 @@
         }
       }
       if (due === "week") {
-        // Match dueBucket("week"): after end of today through end of day +7.
-        var todayEnd = endOfDay(now).getTime();
+        // Match dueBucket("week"): after end of tomorrow through end of day +7.
+        var tomorrowEnd = endOfDay(
+          new Date(now.getTime() + 24 * 60 * 60 * 1000)
+        ).getTime();
         var weekEnd = endOfDay(
           new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
         ).getTime();
         if (
           !dueTs ||
           rowState === "complete" ||
-          dueTs <= todayEnd ||
+          dueTs <= tomorrowEnd ||
           dueTs > weekEnd
         ) {
           return false;
@@ -1128,10 +1203,10 @@
   function dueBucket(item) {
     var rowState = itemState(item);
     if (!item.due) {
-      return { id: "none", label: "No due date", order: 4 };
+      return { id: "none", label: "No due date", order: 5 };
     }
     if (rowState === "complete") {
-      return { id: "done", label: "Completed", order: 5 };
+      return { id: "done", label: "Completed", order: 6 };
     }
     var ts = new Date(item.due).getTime();
     var now = new Date();
@@ -1141,13 +1216,19 @@
     if (ts <= endOfDay(now).getTime()) {
       return { id: "today", label: "Due today", order: 1 };
     }
+    var tomorrowEnd = endOfDay(
+      new Date(now.getTime() + 24 * 60 * 60 * 1000)
+    ).getTime();
+    if (ts <= tomorrowEnd) {
+      return { id: "tomorrow", label: "Due tomorrow", order: 2 };
+    }
     if (
       ts <=
       endOfDay(new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)).getTime()
     ) {
-      return { id: "week", label: "Next 7 days", order: 2 };
+      return { id: "week", label: "Next 7 days", order: 3 };
     }
-    return { id: "later", label: "Later", order: 3 };
+    return { id: "later", label: "Later", order: 4 };
   }
 
   function groupInfo(item) {
@@ -2046,7 +2127,7 @@
       if (label) label.textContent = "Load with this view";
       if (icon) icon.textContent = "bookmark";
     } else {
-      if (label) label.textContent = "Load checklists";
+      if (label) label.textContent = "Load boards";
       if (icon) icon.textContent = "radar";
     }
   }
@@ -2112,7 +2193,7 @@
       id: id || "view-" + Date.now(),
       name: name,
       workType: state.workType,
-      status: els.filterStatus.value,
+      status: state.hideCompleted ? "incomplete" : "all",
       due: els.filterDue.value,
       groupBy: state.groupBy,
       view: state.view,
@@ -2134,7 +2215,7 @@
       var key = node.getAttribute("data-sort");
       var base =
         node.getAttribute("data-label") ||
-        (node.textContent || "").replace(/\s*[↑↓]\s*$/, "").trim();
+        (node.textContent || "").replace(/\s*[â†‘â†“]\s*$/, "").trim();
       if (!node.getAttribute("data-label")) {
         node.setAttribute("data-label", base);
       }
@@ -2165,14 +2246,17 @@
     state.sortKey = view.sortKey || "due";
     state.sortDir = view.sortDir === "desc" ? "desc" : "asc";
     state.showReminders = Boolean(view.showReminders);
+    state.hideCompleted = view.status !== "all" && view.status !== "complete";
     state.collapsedGroups = Object.assign({}, view.collapsedGroups || {});
     if (els.filterWorkType) els.filterWorkType.value = state.workType;
     if (els.filterReminders) {
-      els.filterReminders.value = state.showReminders ? "show" : "hide";
+      els.filterReminders.checked = state.showReminders;
     }
-    els.filterStatus.value = view.status || "incomplete";
-    els.filterDue.value = view.due || "all";
+    if (els.filterHideCompleted) {
+      els.filterHideCompleted.checked = state.hideCompleted;
+    }
     if (els.filterGroup) els.filterGroup.value = state.groupBy;
+    els.filterDue.value = view.due || "all";
     els.filterSearch.value = view.search || "";
     setCheckedValues(els.filterAssignee, view.assignees || []);
     setCheckedValues(els.filterBoard, view.boards || []);
@@ -2187,6 +2271,15 @@
     if (els.filterList) {
       updateMultiSummary(els.filterList, "All lists", "All lists");
     }
+    var advanced = document.querySelector(".field-advanced");
+    if (
+      advanced &&
+      ((view.labels && view.labels.length) || (view.lists && view.lists.length))
+    ) {
+      advanced.open = true;
+    }
+    var savedDetails = document.querySelector(".field-saved");
+    if (savedDetails && view.id) savedDetails.open = true;
     if (els.savedViewName) els.savedViewName.value = view.name || "";
     if (els.savedViews && view.id) els.savedViews.value = view.id;
     syncSortHeaders();
@@ -2198,6 +2291,7 @@
       sortDir: state.sortDir,
       collapsedGroups: state.collapsedGroups,
       showReminders: state.showReminders,
+      hideCompleted: state.hideCompleted,
     });
     renderTable();
   }
@@ -2237,11 +2331,7 @@
     if (assignees.length === 1 && assignees[0] === "me") bits.push("Me");
     else if (assignees.length) bits.push(assignees.length + " assignees");
 
-    if (els.filterStatus.value !== "all") {
-      bits.push(
-        els.filterStatus.value === "incomplete" ? "Open" : "Complete"
-      );
-    }
+    if (state.hideCompleted) bits.push("Open");
     if (state.showReminders) bits.push("Reminders");
     if (els.filterDue.value !== "all" && state.view !== "calendar") {
       var dueLabels = {
@@ -2315,22 +2405,15 @@
     var hasData = Boolean(state.data);
 
     if (els.refreshBtn) {
-      // Standalone primary action before the first successful checklist scan.
+      // Standalone primary action before the first successful load.
       els.refreshBtn.hidden = !ready || hasData;
       els.refreshBtn.disabled = !ready || hasData;
       var label = els.refreshBtn.querySelector(".btn-label");
       var icon = els.refreshBtn.querySelector(".material-symbols-outlined");
-      if (!state.boardsReady) {
-        if (label) label.textContent = "List boards";
-        if (icon) icon.textContent = "folder_open";
-        els.refreshBtn.title =
-          "Gets board names only — no checklist items yet";
-      } else {
-        if (label) label.textContent = "Load checklists";
-        if (icon) icon.textContent = "radar";
-        els.refreshBtn.title =
-          "Load checklist items from the boards ticked under Filters → Boards";
-      }
+      if (label) label.textContent = "Load boards";
+      if (icon) icon.textContent = "radar";
+      els.refreshBtn.title =
+        "Load items from the boards ticked under Filters → Boards";
     }
 
     if (els.syncActions) {
@@ -2342,7 +2425,7 @@
       els.statusBtn.disabled = !ready || !hasData;
       els.statusBtn.title = hasData
         ? "Refresh open/complete state for items already loaded"
-        : "Load checklists first, then Update status can refresh known items";
+        : "Load boards first, then Update status can refresh known items";
     }
 
     if (els.syncMenuBtn) {
@@ -2367,12 +2450,24 @@
     closeWelcomeModal({ persist: true, skipSession: true });
     closeScanConfirm();
     if (!state.boardsReady && !opts.forceFull && !opts.boardListOnly) {
-      return loadBoardList();
+      return loadBoardList().then(function () {
+        showBanner(
+          "Board list ready. Tick boards under Filters → Boards, then press Load boards again.",
+          "info",
+          { dismissible: true, bannerKind: "board-pick" }
+        );
+        setConfigOpen(true);
+      });
     }
     if (opts.boardListOnly) {
       return loadBoardList();
     }
     if (state.data && !opts.skipConfirm) {
+      var blocker = getLoadChecklistsBlocker();
+      if (blocker) {
+        warnLoadBlocked(blocker);
+        return Promise.resolve();
+      }
       openScanConfirm();
       return;
     }
@@ -2383,22 +2478,9 @@
     closeScanConfirm();
     closeWelcomeModal({ persist: true, skipSession: true });
     closeSyncMenu();
-    if (!state.boardsReady) {
-      return loadBoardList().then(function () {
-        showBanner(
-          "Board list ready. Tick boards under Filters → Boards, then Load checklists.",
-          "info",
-          { dismissible: true, bannerKind: "board-pick" }
-        );
-      });
-    }
-    if (!getAllowlistBoardIds().length) {
-      showBanner(
-        "Select at least one board under Filters → Boards, then Load checklists.",
-        "info",
-        { dismissible: true, bannerKind: "board-pick" }
-      );
-      setConfigOpen(true);
+    var blocker = getLoadChecklistsBlocker();
+    if (blocker) {
+      warnLoadBlocked(blocker);
       return Promise.resolve();
     }
     if (state.scanAbort) {
@@ -2435,7 +2517,7 @@
       if (els.emptyState) els.emptyState.hidden = false;
       if (!opts.silent) {
         showBanner(
-          "Tick boards under Filters → Boards, then press Load checklists.",
+          "Tick boards under Filters → Boards, then press Load boards.",
           "info",
           { dismissible: true, bannerKind: "board-pick" }
         );
@@ -2452,7 +2534,7 @@
     }
     if (els.subtitle && !state.data) {
       els.subtitle.textContent =
-        "Choose boards, then Load checklists" +
+        "Choose boards, then Load boards" +
         (catalog.me && (catalog.me.fullName || catalog.me.username)
           ? " · " + (catalog.me.fullName || catalog.me.username)
           : "");
@@ -2486,10 +2568,14 @@
       setScanProgress(0, 1, "Board names", "catalog");
       return demoDelay(200)
         .then(function () {
-          var mock =
-            window.ChecklistHubMock && window.ChecklistHubMock.getDataset
-              ? window.ChecklistHubMock.getDataset()
-              : null;
+          var mock = null;
+          if (window.ChecklistHubMock) {
+            if (typeof window.ChecklistHubMock.getDataset === "function") {
+              mock = window.ChecklistHubMock.getDataset();
+            } else if (typeof window.ChecklistHubMock.buildDataset === "function") {
+              mock = window.ChecklistHubMock.buildDataset();
+            }
+          }
           applyBoardCatalog(
             {
               me:
@@ -2509,7 +2595,7 @@
             showBanner("Cancelled.", "info", { dismissible: true });
             return;
           }
-          showErrorBanner(err, "List boards");
+          showErrorBanner(err, "Board list");
         })
         .finally(finish);
     }
@@ -2535,7 +2621,7 @@
         setScanProgress(1, 1, "Done", "catalog");
         if (listOpts.refreshOnly && state.data) {
           showBanner(
-            "Board name list refreshed. Checklist data is unchanged until you Load checklists.",
+            "Board name list refreshed. Checklist data is unchanged until you Load boards.",
             "info",
             { dismissible: true, bannerKind: "board-pick" }
           );
@@ -2546,8 +2632,8 @@
           showBanner("Cancelled.", "info", { dismissible: true });
           return;
         }
-        showErrorBanner(err, "List boards");
-        els.subtitle.textContent = "Could not list boards";
+        showErrorBanner(err, "Board list");
+        els.subtitle.textContent = "Could not list board names";
       })
       .finally(finish);
   }
@@ -2589,14 +2675,14 @@
           (missingCount === 1 ? "" : "s") +
           " that " +
           (missingCount === 1 ? "is" : "are") +
-          " not in this list yet. Load checklists to pull " +
+          " not in this list yet. Load boards to pull " +
           (missingCount === 1 ? "its" : "their") +
           " items (board names stay as they are).",
         "info",
         {
           dismissible: true,
           bannerKind: "allowlist-rescan",
-          actionLabel: "Load checklists",
+          actionLabel: "Load boards",
           action: function () {
             runScan({ skipConfirm: true, forceFull: true });
           },
@@ -2693,7 +2779,7 @@
       els.scanNudge.title =
         "Load checklist items from boards you newly selected under Boards";
       els.scanNudge.innerHTML =
-        '<span class="material-symbols-outlined" aria-hidden="true">radar</span> Load checklists for new boards?';
+        '<span class="material-symbols-outlined" aria-hidden="true">radar</span> Load boards for new boards?';
       return;
     }
     if (!state.data || !state.data.fetchedAt || state.loading) {
@@ -2706,9 +2792,9 @@
     els.scanNudge.hidden = age < nudgeAfter;
     if (!els.scanNudge.hidden) {
       els.scanNudge.title =
-        "Load checklists again for selected boards (find newly assigned work)";
+        "Load boards again for selected boards (find newly assigned work)";
       els.scanNudge.innerHTML =
-        '<span class="material-symbols-outlined" aria-hidden="true">radar</span> Load checklists for new assignments?';
+        '<span class="material-symbols-outlined" aria-hidden="true">radar</span> Load boards for new assignments?';
     }
   }
 
@@ -2723,7 +2809,7 @@
       if (note) {
         note.hidden = false;
         note.textContent =
-          "Tick boards under Filters → Boards, then Load checklists. Closing the hub clears checklist data.";
+          "Tick boards under Filters → Boards, then Load boards. Closing the hub clears checklist data.";
       }
     } else if (mode === "idle") {
       if (heading) heading.textContent = "Ready when you are";
@@ -2731,7 +2817,7 @@
       if (note) {
         note.hidden = false;
         note.textContent =
-          "Boards are listed when you open the hub. Tick the ones you need, then Load checklists. Day to day, prefer Update status.";
+          "Boards are listed when you open the hub. Tick the ones you need, then Load boards. Day to day, prefer Update status.";
       }
     } else {
       if (heading) heading.textContent = "No matching work";
@@ -2739,7 +2825,7 @@
       if (note) {
         note.hidden = false;
         note.textContent =
-          "Try My day, widen filters, open Undated, or Load checklists again.";
+          "Try My day, widen filters, open Undated, or Load boards again.";
       }
     }
   }
@@ -3009,7 +3095,7 @@
           if (els.calendarWrap) els.calendarWrap.hidden = true;
           els.emptyState.hidden = true;
           showBanner(
-            "Authorize once with Trello (read-only). Boards list next — tick what you need, then Load checklists.",
+            "Authorize once with Trello (read-only). Boards list next — tick what you need, then Load boards.",
             "info"
           );
           return null;
@@ -3135,7 +3221,7 @@
     if (!state.data) {
       if (!silent) {
         showBanner(
-          "Load checklists first. Update status then refreshes what you already have.",
+          "Load boards first. Update status then refreshes what you already have.",
           "info",
           { dismissible: true }
         );
@@ -3236,7 +3322,7 @@
             " · changed " +
             (meta.updated || 0) +
             (meta.added ? " · +" + meta.added : "") +
-            (meta.removed ? " · −" + meta.removed : "");
+            (meta.removed ? " · âˆ’" + meta.removed : "");
         }
 
         applyDataset(result.data, {
@@ -3247,7 +3333,7 @@
 
         if (!silent) {
           showBanner(
-            "Updated statuses for items already in this list. Load checklists to pick up brand-new work.",
+            "Updated statuses for items already in this list. Load boards to pick up brand-new work.",
             "info",
             { dismissible: true }
           );
@@ -3286,7 +3372,27 @@
     return new Promise(function (resolve, reject) {
       demoDelay(forceRefresh ? 250 : 80)
         .then(function () {
-          applyDataset(window.ChecklistHubMock.buildDataset(), {
+          var dataset = window.ChecklistHubMock.buildDataset();
+          var selected = getAllowlistBoardIds();
+          var selectedSet = {};
+          selected.forEach(function (id) {
+            selectedSet[id] = true;
+          });
+          if (selected.length) {
+            dataset.boards = (dataset.boards || []).filter(function (b) {
+              return selectedSet[b.id];
+            });
+            dataset.scannedBoardIds = selected.slice();
+            dataset.items = (dataset.items || []).filter(function (item) {
+              return selectedSet[item.boardId];
+            });
+            dataset.memberCards = (dataset.memberCards || []).filter(
+              function (card) {
+                return selectedSet[card.boardId];
+              }
+            );
+          }
+          applyDataset(dataset, {
             subtitle: "Demo user · Alex Rivera",
             cacheNote:
               "Local mock dataset · boards are member-accessible only · open cards in Trello to complete",
@@ -3300,11 +3406,24 @@
   }
 
   function loadData(forceRefresh) {
+    var blocker = getLoadChecklistsBlocker();
+    // beginScan already checks; guard any other callers.
+    if (blocker && !state.loading) {
+      warnLoadBlocked(blocker);
+      return Promise.resolve();
+    }
     if (state.loading) return Promise.resolve();
     state.loading = true;
     syncActionButtons();
     updateScanNudge();
-    if (!state.demo) clearNonPrivacyBanner();
+    if (
+      els.banner &&
+      els.banner.getAttribute("data-banner-kind") === "load-blocked"
+    ) {
+      showBanner(null);
+    } else if (!state.demo) {
+      clearNonPrivacyBanner();
+    }
 
     var finish = function () {
       state.loading = false;
@@ -3325,7 +3444,7 @@
             showBanner("Cancelled.", "info", { dismissible: true });
             els.subtitle.textContent = state.data
               ? "Demo user · Alex Rivera"
-              : "Authorized · tick boards, then Load checklists";
+              : "Authorized · tick boards, then Load boards";
             return;
           }
           throw err;
@@ -3397,10 +3516,10 @@
               ((state.data.me &&
                 (state.data.me.fullName || state.data.me.username)) ||
                 "member")
-            : "Authorized · tick boards, then Load checklists";
+            : "Authorized · tick boards, then Load boards";
           return;
         }
-        showErrorBanner(err, "Load checklists");
+        showErrorBanner(err, "Load boards");
         els.subtitle.textContent = "Something went wrong";
       })
       .finally(finish);
@@ -3457,29 +3576,23 @@
             "Listing boards… Use Quick start for a team or saved view, or tick boards yourself.";
         } else {
           els.welcomeLead.textContent =
-            "Listing available boards… then tick Boards and Load checklists.";
+            "Listing available boards… then tick Boards and Load boards.";
         }
       } else if (hasTeams || hasViews) {
         els.welcomeLead.textContent =
-          "Use Quick start, or tick Boards yourself, then Load checklists.";
+          "Use Quick start, or tick Boards yourself, then Load boards.";
       } else {
         els.welcomeLead.textContent =
-          "Tick boards under Filters → Boards, then Load checklists. Day to day, prefer Update status.";
+          "Tick boards under Filters → Boards, then Load boards. Day to day, prefer Update status.";
       }
     }
     if (els.welcomeScan) {
       var scanLabel = els.welcomeScan.querySelector(".btn-label");
       var scanIcon = els.welcomeScan.querySelector(".material-symbols-outlined");
-      if (!state.boardsReady) {
-        if (scanLabel) scanLabel.textContent = "List boards";
-        if (scanIcon) scanIcon.textContent = "folder_open";
-        els.welcomeScan.title = "Gets board names only — no checklist items yet";
-      } else {
-        if (scanLabel) scanLabel.textContent = "Load checklists";
-        if (scanIcon) scanIcon.textContent = "radar";
-        els.welcomeScan.title =
-          "Load checklist items from the boards ticked under Filters → Boards";
-      }
+      if (scanLabel) scanLabel.textContent = "Load boards";
+      if (scanIcon) scanIcon.textContent = "radar";
+      els.welcomeScan.title =
+        "Load items from the boards ticked under Filters → Boards";
     }
     updateWelcomeStarterLoadButton();
   }
@@ -3497,7 +3610,7 @@
   }
 
   function teamBlocksScan() {
-    // Team with no default boards must not block manual Load checklists.
+    // Team with no default boards must not block manual Load boards.
     // Only the welcome "Load team checklists" shortcut needs team boards.
     var team = findTeamById(state.selectedTeamId);
     if (!team) return false;
@@ -3577,7 +3690,7 @@
           showBanner(
             "Team “" +
               team.name +
-              "” has no default boards. Tick boards under Filters → Boards yourself, then Load checklists.",
+              "” has no default boards. Tick boards under Filters → Boards yourself, then Load boards.",
             "info",
             { dismissible: true, bannerKind: "board-pick" }
           );
@@ -3882,11 +3995,19 @@
       });
   });
 
-  [els.filterStatus, els.filterDue].forEach(function (el) {
-    el.addEventListener("change", function () {
+  if (els.filterDue) {
+    els.filterDue.addEventListener("change", function () {
       renderTable();
     });
-  });
+  }
+
+  if (els.filterHideCompleted) {
+    els.filterHideCompleted.addEventListener("change", function () {
+      state.hideCompleted = Boolean(els.filterHideCompleted.checked);
+      savePrefs({ hideCompleted: state.hideCompleted });
+      renderTable();
+    });
+  }
 
   if (els.filterWorkType) {
     els.filterWorkType.addEventListener("change", function () {
@@ -3898,7 +4019,7 @@
 
   if (els.filterReminders) {
     els.filterReminders.addEventListener("change", function () {
-      state.showReminders = els.filterReminders.value === "show";
+      state.showReminders = Boolean(els.filterReminders.checked);
       savePrefs({ showReminders: state.showReminders });
       renderTable();
     });
@@ -4048,18 +4169,24 @@
       var parsed = parseWelcomeStarter(
         els.welcomeStarter && els.welcomeStarter.value
       );
-      if (parsed.kind === "none") return;
+      if (parsed.kind === "none") {
+        showBanner(
+          "Choose a team or saved view in Quick start, or close this and tick boards under Filters → Boards before Load boards.",
+          "warn",
+          { dismissible: true, bannerKind: "load-blocked" }
+        );
+        return;
+      }
 
       if (parsed.kind === "team") {
         closeWelcomeModal({ skipSession: true });
         applySelectedTeam(parsed.id).then(function () {
           if (teamBlocksScan() && !getAllowlistBoardIds().length) {
-            showBanner(
-              "This team has no default boards. Tick boards under Filters → Boards, then Load checklists.",
-              "info",
-              { dismissible: true, bannerKind: "board-pick" }
-            );
-            setConfigOpen(true);
+            warnLoadBlocked({
+              message:
+                "This team has no default boards. Tick boards under Filters → Boards, then Load boards.",
+              openFilters: true,
+            });
             return;
           }
           var goTeam = function () {
@@ -4347,7 +4474,7 @@
       populateSavedViews();
       els.savedViews.value = id;
       showBanner(
-        "That view will apply after you load checklists next time you open Checklist Hub.",
+        "That view will apply after you Load boards next time you open Checklist Hub.",
         "info",
         { dismissible: true }
       );

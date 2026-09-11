@@ -27,6 +27,7 @@
       welcomeDismissed: false,
       defaultViewId: "",
       showReminders: false,
+      hideCompleted: true,
     };
   }
 
@@ -53,6 +54,7 @@
       welcomeDismissed: Boolean(next.welcomeDismissed),
       defaultViewId: String(next.defaultViewId || "").slice(0, 40),
       showReminders: Boolean(next.showReminders),
+      hideCompleted: next.hideCompleted !== false,
     };
     cookies.writeJson(PREFS_COOKIE, safe, 180);
     return safe;

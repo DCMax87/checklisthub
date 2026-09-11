@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Checklist Hub</title>
     <link rel="icon" href="./icons/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./css/dashboard.css?v=20260910f" />
+    <link rel="stylesheet" href="./css/dashboard.css?v=20260911d" />
   </head>
   <body class="dashboard-page">
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -65,10 +65,10 @@
           class="btn btn-primary"
           disabled
           hidden
-          title="Load checklist items from selected boards"
+          title="Load items from the boards ticked under Filters → Boards"
         >
-          <span class="material-symbols-outlined" aria-hidden="true">folder_open</span>
-          <span class="btn-label">List boards</span>
+          <span class="material-symbols-outlined" aria-hidden="true">radar</span>
+          <span class="btn-label">Load boards</span>
         </button>
         <div class="split-action" id="sync-actions" hidden>
           <button
@@ -98,7 +98,7 @@
             <button type="button" id="sync-scan-btn">
               <span class="split-action-item-title">
                 <span class="material-symbols-outlined" aria-hidden="true">radar</span>
-                Load checklists
+                Load boards
               </span>
               <span class="split-action-item-desc">
                 Pull items from the boards ticked under Filters → Boards
@@ -118,15 +118,26 @@
         <div class="command-strip-main">
           <p id="result-count" class="result-count" aria-live="polite"></p>
           <p id="filter-summary" class="filter-summary"></p>
-          <div class="focus-chips" id="focus-chips" role="group" aria-label="Quick due filters">
-            <button type="button" class="chip chip-emphasis" data-due-chip="myday" aria-pressed="false">
-              My day
-            </button>
-            <button type="button" class="chip" data-due-chip="overdue" aria-pressed="false">Overdue</button>
-            <button type="button" class="chip" data-due-chip="today" aria-pressed="false">Today</button>
-            <button type="button" class="chip" data-due-chip="week" aria-pressed="false">7 days</button>
-            <button type="button" class="chip" data-due-chip="none" aria-pressed="false">Undated</button>
-            <button type="button" class="chip" data-due-chip="all" aria-pressed="true">All</button>
+          <div class="focus-tools">
+            <div class="focus-chips" id="focus-chips" role="group" aria-label="Quick due filters">
+              <button type="button" class="chip chip-emphasis" data-due-chip="myday" aria-pressed="false">
+                My day
+              </button>
+              <button type="button" class="chip" data-due-chip="overdue" aria-pressed="false">Overdue</button>
+              <button type="button" class="chip" data-due-chip="today" aria-pressed="false">Today</button>
+              <button type="button" class="chip" data-due-chip="week" aria-pressed="false">7 days</button>
+              <button type="button" class="chip" data-due-chip="none" aria-pressed="false">Undated</button>
+              <button type="button" class="chip" data-due-chip="all" aria-pressed="true">All</button>
+            </div>
+            <div class="focus-search">
+              <label class="sr-only" for="filter-search">Search</label>
+              <input
+                id="filter-search"
+                type="search"
+                placeholder="Search items…"
+                autocomplete="off"
+              />
+            </div>
           </div>
         </div>
         <div class="command-strip-side">
@@ -135,10 +146,10 @@
             id="scan-nudge"
             class="scan-nudge"
             hidden
-            title="Load checklists to pick up newly assigned work"
+            title="Load boards to pick up newly assigned work"
           >
             <span class="material-symbols-outlined" aria-hidden="true">radar</span>
-            Load checklists for new assignments?
+            Load boards for new assignments?
           </button>
           <button
             type="button"
@@ -170,7 +181,7 @@
           <span class="material-symbols-outlined" aria-hidden="true">close</span>
         </button>
         <div class="config-grid">
-          <div class="field">
+          <div class="field field-work-type">
             <div class="field-label-block">
               <label class="field-label" for="filter-work-type">Show</label>
             </div>
@@ -180,29 +191,7 @@
               <option value="card">Member cards without tasks</option>
             </select>
           </div>
-          <div class="field">
-            <div class="field-label-block">
-              <label class="field-label" for="filter-status">Status</label>
-            </div>
-            <select id="filter-status">
-              <option value="incomplete">Incomplete / open</option>
-              <option value="complete">Complete</option>
-              <option value="all">All</option>
-            </select>
-          </div>
-          <div class="field">
-            <div class="field-label-block">
-              <label class="field-label" for="filter-reminders">Reminders</label>
-            </div>
-            <select
-              id="filter-reminders"
-              title="Lead-day reminder rows from Trello due reminders"
-            >
-              <option value="hide">Hide</option>
-              <option value="show">Show</option>
-            </select>
-          </div>
-          <div class="field">
+          <div class="field field-due">
             <div class="field-label-block">
               <label class="field-label" for="filter-due">Due</label>
             </div>
@@ -232,18 +221,7 @@
               <option value="0">All</option>
             </select>
           </div>
-          <div class="field field-search">
-            <div class="field-label-block">
-              <label class="field-label" for="filter-search">Search</label>
-            </div>
-            <input
-              id="filter-search"
-              type="search"
-              placeholder="Item, card, or checklist…"
-              autocomplete="off"
-            />
-          </div>
-          <div class="field">
+          <div class="field field-team">
             <div class="field-label-block">
               <label class="field-label" for="filter-team">Team</label>
             </div>
@@ -257,7 +235,7 @@
               Group by Assignee to list Unassigned last.
             </p>
           </div>
-          <div class="field">
+          <div class="field field-assignee">
             <div class="field-label-block">
               <span class="field-label" id="filter-assignee-label">Assignees</span>
             </div>
@@ -303,7 +281,7 @@
               </div>
             </div>
           </div>
-          <div class="field">
+          <div class="field field-board">
             <div class="field-label-block">
               <span class="field-label" id="filter-board-label">Boards</span>
             </div>
@@ -338,112 +316,117 @@
             </div>
             <p class="field-hint">
               Listed automatically when you open the hub. Ticked boards are
-              shown after you <strong>Load checklists</strong>. Untick to hide.
+              shown after you <strong>Load boards</strong>. Untick to hide.
               Tick a board that has not been loaded yet and you will be asked to
-              Load checklists again.
+              Load boards again.
             </p>
           </div>
-          <div class="field">
-            <div class="field-label-block">
-              <span class="field-label" id="filter-label-label">Labels</span>
-            </div>
-            <div
-              class="multi-select"
-              id="filter-label"
-              data-filter="label"
-            >
-              <button
-                type="button"
-                class="multi-select-toggle"
-                id="filter-label-toggle"
-                aria-haspopup="listbox"
-                aria-expanded="false"
-                aria-controls="filter-label-panel"
-                aria-labelledby="filter-label-label filter-label-summary"
-              >
-                <span class="multi-select-summary" id="filter-label-summary"
-                  >All labels</span
-                >
-              </button>
-              <div class="multi-select-panel" id="filter-label-panel" hidden>
-                <div class="multi-select-actions">
-                  <button type="button" data-action="all">Select all</button>
-                  <button type="button" data-action="clear">Clear</button>
+          <details class="config-details field-advanced">
+            <summary>Advanced</summary>
+            <div class="config-details-body">
+              <div class="field field-label">
+                <div class="field-label-block">
+                  <span class="field-label" id="filter-label-label">Labels</span>
                 </div>
-                <div id="filter-label-options" class="multi-options"></div>
-              </div>
-            </div>
-          </div>
-          <div class="field">
-            <div class="field-label-block">
-              <span class="field-label" id="filter-list-label">Lists</span>
-            </div>
-            <div
-              class="multi-select"
-              id="filter-list"
-              data-filter="list"
-            >
-              <button
-                type="button"
-                class="multi-select-toggle"
-                id="filter-list-toggle"
-                aria-haspopup="listbox"
-                aria-expanded="false"
-                aria-controls="filter-list-panel"
-                aria-labelledby="filter-list-label filter-list-summary"
-              >
-                <span class="multi-select-summary" id="filter-list-summary"
-                  >All lists</span
+                <div
+                  class="multi-select"
+                  id="filter-label"
+                  data-filter="label"
                 >
-              </button>
-              <div class="multi-select-panel" id="filter-list-panel" hidden>
-                <div class="multi-select-actions">
-                  <button type="button" data-action="all">Select all</button>
-                  <button type="button" data-action="clear">Clear</button>
+                  <button
+                    type="button"
+                    class="multi-select-toggle"
+                    id="filter-label-toggle"
+                    aria-haspopup="listbox"
+                    aria-expanded="false"
+                    aria-controls="filter-label-panel"
+                    aria-labelledby="filter-label-label filter-label-summary"
+                  >
+                    <span class="multi-select-summary" id="filter-label-summary"
+                      >All labels</span
+                    >
+                  </button>
+                  <div class="multi-select-panel" id="filter-label-panel" hidden>
+                    <div class="multi-select-actions">
+                      <button type="button" data-action="all">Select all</button>
+                      <button type="button" data-action="clear">Clear</button>
+                    </div>
+                    <div id="filter-label-options" class="multi-options"></div>
+                  </div>
                 </div>
-                <div id="filter-list-options" class="multi-options"></div>
               </div>
-            </div>
-          </div>
-          <div class="field field-saved">
-            <div class="field-label-block">
-              <label class="field-label" for="saved-views">Saved views</label>
-            </div>
-            <div class="saved-views">
-              <select id="saved-views" aria-label="Choose a saved view">
-                <option value="">—</option>
-              </select>
-              <label class="sr-only" for="saved-view-name">View name</label>
-              <input
-                id="saved-view-name"
-                type="text"
-                placeholder="Name for Save / Rename"
-                autocomplete="off"
-              />
-              <div class="saved-views-actions">
-                <button type="button" id="save-view-btn" class="btn btn-ghost">Save</button>
-                <button type="button" id="rename-view-btn" class="btn btn-ghost">Rename</button>
-                <button type="button" id="delete-view-btn" class="btn btn-ghost">Delete</button>
-                <button
-                  type="button"
-                  id="default-view-btn"
-                  class="btn btn-ghost"
-                  title="Apply this view automatically after Load checklists"
+              <div class="field field-list">
+                <div class="field-label-block">
+                  <span class="field-label" id="filter-list-label">Lists</span>
+                </div>
+                <div
+                  class="multi-select"
+                  id="filter-list"
+                  data-filter="list"
                 >
-                  Set as default
-                </button>
+                  <button
+                    type="button"
+                    class="multi-select-toggle"
+                    id="filter-list-toggle"
+                    aria-haspopup="listbox"
+                    aria-expanded="false"
+                    aria-controls="filter-list-panel"
+                    aria-labelledby="filter-list-label filter-list-summary"
+                  >
+                    <span class="multi-select-summary" id="filter-list-summary"
+                      >All lists</span
+                    >
+                  </button>
+                  <div class="multi-select-panel" id="filter-list-panel" hidden>
+                    <div class="multi-select-actions">
+                      <button type="button" data-action="all">Select all</button>
+                      <button type="button" data-action="clear">Clear</button>
+                    </div>
+                    <div id="filter-list-options" class="multi-options"></div>
+                  </div>
+                </div>
               </div>
             </div>
-            <p class="field-hint">
-              Saves your current filters, boards, and grouping. Pick one on the
-              welcome screen next time for a faster start.
-            </p>
-          </div>
+          </details>
+          <details class="config-details field-saved">
+            <summary>Saved views</summary>
+            <div class="config-details-body">
+              <div class="saved-views">
+                <select id="saved-views" aria-label="Choose a saved view">
+                  <option value="">—</option>
+                </select>
+                <label class="sr-only" for="saved-view-name">View name</label>
+                <input
+                  id="saved-view-name"
+                  type="text"
+                  placeholder="Name for Save / Rename"
+                  autocomplete="off"
+                />
+                <div class="saved-views-actions">
+                  <button type="button" id="save-view-btn" class="btn btn-ghost">Save</button>
+                  <button type="button" id="rename-view-btn" class="btn btn-ghost">Rename</button>
+                  <button type="button" id="delete-view-btn" class="btn btn-ghost">Delete</button>
+                  <button
+                    type="button"
+                    id="default-view-btn"
+                    class="btn btn-ghost"
+                    title="Apply this view automatically after Load boards"
+                  >
+                    Set as default
+                  </button>
+                </div>
+              </div>
+              <p class="field-hint">
+                Saves your current filters, boards, and grouping. Pick one on the
+                welcome screen next time for a faster start.
+              </p>
+            </div>
+          </details>
           <p class="prefs-privacy-note">
             Preferences use cookies only. Trello data stays in memory while this
             hub is open.
             <button type="button" id="welcome-help-btn" class="linkish">
-              About List, Load &amp; Update
+              About Load &amp; Update
             </button>
           </p>
         </div>
@@ -464,7 +447,7 @@
           <div class="banner-actions" id="banner-actions" hidden>
             <button type="button" id="banner-action-btn" class="btn btn-primary banner-action">
               <span class="material-symbols-outlined" aria-hidden="true">radar</span>
-              <span class="btn-label" id="banner-action-label">Load checklists</span>
+              <span class="btn-label" id="banner-action-label">Load boards</span>
             </button>
           </div>
           <button type="button" id="banner-dismiss" class="banner-dismiss" hidden>
@@ -472,6 +455,20 @@
           </button>
         </div>
         <div class="stage-bar-controls">
+          <label
+            class="stage-check"
+            title="When checked, completed items stay hidden"
+          >
+            <input type="checkbox" id="filter-hide-completed" checked />
+            <span>Hide completed</span>
+          </label>
+          <label
+            class="stage-check"
+            title="Show lead-day reminder rows in Due today and Due tomorrow"
+          >
+            <input type="checkbox" id="filter-reminders" />
+            <span>Reminders</span>
+          </label>
           <label class="group-field" id="group-field">
             <span>Group</span>
             <select id="filter-group">
@@ -526,7 +523,7 @@
       >
         <p class="status-refresh-text">
           Item statuses may be out of date. Update status refreshes open/complete
-          for items already here. Load checklists again to find brand-new work.
+          for items already here. Load boards again to find brand-new work.
         </p>
         <div class="status-refresh-actions">
           <button type="button" id="status-refresh-dismiss" class="btn btn-ghost">
@@ -552,8 +549,8 @@
               (a team preselects them).
             </li>
             <li>
-              <strong>Load checklists</strong> for those boards — then open
-              cards in Trello to finish work.
+              <strong>Load boards</strong> — then open cards in Trello to finish
+              work.
             </li>
           </ol>
           <p class="empty-note">
@@ -775,7 +772,7 @@
       <div class="welcome-dialog">
         <h2 id="welcome-title">Get started</h2>
         <p class="welcome-lead" id="welcome-lead">
-          Authorize once, tick the boards you need, then Load checklists.
+          Authorize once, tick the boards you need, then Load boards.
           Closing the hub clears the list — load again next time you open it.
         </p>
 
@@ -790,7 +787,7 @@
           </p>
           <button type="button" id="welcome-starter-load" class="btn btn-primary" disabled>
             <span class="material-symbols-outlined" aria-hidden="true">radar</span>
-            <span class="btn-label">Load checklists</span>
+            <span class="btn-label">Load boards</span>
           </button>
         </div>
 
@@ -803,10 +800,10 @@
             type="button"
             id="welcome-scan"
             class="btn btn-ghost"
-            title="List board names first, or load checklists for selected boards"
+            title="Load items from the boards ticked under Filters → Boards"
           >
-            <span class="material-symbols-outlined" aria-hidden="true">folder_open</span>
-            <span class="btn-label">List boards</span>
+            <span class="material-symbols-outlined" aria-hidden="true">radar</span>
+            <span class="btn-label">Load boards</span>
           </button>
         </div>
       </div>
@@ -822,11 +819,10 @@
     >
       <div class="welcome-backdrop" data-scan-confirm-close></div>
       <div class="welcome-dialog">
-        <h2 id="scan-confirm-title">Load checklists again?</h2>
+        <h2 id="scan-confirm-title">Load boards again?</h2>
         <p class="welcome-lead">
           This pulls checklist items from the boards ticked under
-          <strong>Filters → Boards</strong>. It is not the same as refreshing
-          the board name list.
+          <strong>Filters → Boards</strong>.
         </p>
         <p class="welcome-note">
           Prefer <strong>Update status</strong> for items you already have open.
@@ -840,7 +836,7 @@
           </button>
           <button type="button" id="scan-confirm-ok" class="btn btn-primary">
             <span class="material-symbols-outlined" aria-hidden="true">radar</span>
-            <span class="btn-label">Load checklists</span>
+            <span class="btn-label">Load boards</span>
           </button>
         </div>
       </div>
@@ -849,9 +845,9 @@
     <script src="./config.js?v=20260910b"></script>
     <script src="https://p.trellocdn.com/power-up.min.js"></script>
     <script src="./js/cookies.js?v=20260910a"></script>
-    <script src="./js/prefs.js?v=20260910b"></script>
-    <script src="./js/mock-data.js?v=20260910b"></script>
-    <script src="./js/api.js?v=20260910f"></script>
-    <script src="./js/dashboard.js?v=20260910f"></script>
+    <script src="./js/prefs.js?v=20260911b"></script>
+    <script src="./js/mock-data.js?v=20260911f"></script>
+    <script src="./js/api.js?v=20260911e"></script>
+    <script src="./js/dashboard.js?v=20260911f"></script>
   </body>
 </html>

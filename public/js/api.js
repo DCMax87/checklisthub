@@ -771,15 +771,15 @@
       httpCalls = 1;
       bootstrapUnits = 2;
 
-      if (Array.isArray(allowlist)) {
-        const allowed = {};
-        allowlist.forEach(function (id) {
-          allowed[id] = true;
-        });
-        boards = boards.filter(function (b) {
-          return allowed[b.id];
-        });
-      }
+      // Explicit selection only — never treat missing/empty as “all boards”.
+      const selected = Array.isArray(allowlist) ? allowlist : [];
+      const allowed = {};
+      selected.forEach(function (id) {
+        allowed[id] = true;
+      });
+      boards = boards.filter(function (b) {
+        return allowed[b.id];
+      });
     }
 
     boards.sort(function (a, b) {
@@ -1108,7 +1108,7 @@
 
     const data = await loadBoardsBundle(token, {
       onProgress: opts.onProgress,
-      boardIds: opts.boardIds || null,
+      boardIds: Array.isArray(opts.boardIds) ? opts.boardIds : [],
       signal: opts.signal || null,
     });
     writeCache(data);
@@ -1403,7 +1403,7 @@
       return getChecklistData(token, {
         forceRefresh: true,
         onProgress: opts.onProgress,
-        boardIds: opts.boardIds || null,
+        boardIds: Array.isArray(opts.boardIds) ? opts.boardIds : [],
       });
     }
 
