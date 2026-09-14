@@ -3,11 +3,32 @@
   var api = window.ChecklistHubApi;
   var prefsApi = window.ChecklistHubPrefs;
   var cookies = window.ChecklistHubCookies;
+  var demoMode = window.ChecklistHubDemoMode || {};
   var params = new URLSearchParams(window.location.search);
+  var powerUpMissing =
+    typeof demoMode.powerUpMissingWhileEmbedded === "function"
+      ? demoMode.powerUpMissingWhileEmbedded()
+      : false;
   var isDemo =
-    params.get("demo") === "1" ||
-    params.get("demo") === "true" ||
-    config.forceDemo === true;
+    !powerUpMissing &&
+    (typeof demoMode.detect === "function"
+      ? demoMode.detect(params, config)
+      : false);
+
+  if (
+    isDemo &&
+    params.get("demo") !== "1" &&
+    params.get("demo") !== "true" &&
+    !(config && config.forceDemo)
+  ) {
+    try {
+      var demoUrl = new URL(window.location.href);
+      demoUrl.searchParams.set("demo", "1");
+      window.history.replaceState({}, "", demoUrl.toString());
+    } catch (e) {
+      // ignore
+    }
+  }
 
   cookies.purgeLegacyBrowserStorage();
 
@@ -52,6 +73,10 @@
     itemsBody: document.getElementById("items-body"),
     filterAssignee: document.getElementById("filter-assignee"),
     filterHideCompleted: document.getElementById("filter-hide-completed"),
+    filterHideCards: document.getElementById("filter-hide-cards"),
+    stageHideCompleted: document.getElementById("stage-hide-completed"),
+    stageHideCards: document.getElementById("stage-hide-cards"),
+    stageReminders: document.getElementById("stage-reminders"),
     filterDue: document.getElementById("filter-due"),
     filterReminders: document.getElementById("filter-reminders"),
     filterBoard: document.getElementById("filter-board"),
@@ -64,6 +89,15 @@
     focusChips: document.getElementById("focus-chips"),
     exportBtn: document.getElementById("export-btn"),
     viewToggle: document.getElementById("view-toggle"),
+    viewSelect: document.getElementById("view-select"),
+    viewMenuBtn: document.getElementById("view-menu-btn"),
+    viewMenu: document.getElementById("view-menu"),
+    viewMenuIcon: document.getElementById("view-menu-icon"),
+    viewMenuLabel: document.getElementById("view-menu-label"),
+    themeToggle: document.getElementById("theme-toggle"),
+    themeToggleIcon: document.getElementById("theme-toggle-icon"),
+    themeToggleLabel: document.getElementById("theme-toggle-label"),
+    themeToggleGroup: document.getElementById("theme-toggle-group"),
     densityToggle: document.getElementById("density-toggle"),
     welcomeModal: document.getElementById("welcome-modal"),
     welcomeDismiss: document.getElementById("welcome-dismiss"),
@@ -100,8 +134,34 @@
     apiUsageModalClose: document.getElementById("api-usage-modal-close"),
     apiUsageSummary: document.getElementById("api-usage-summary"),
     apiUsageBuckets: document.getElementById("api-usage-buckets"),
+    disconnectBtn: document.getElementById("disconnect-btn"),
+    disconnectSep: document.getElementById("disconnect-sep"),
+    footerSupport: document.getElementById("footer-support"),
+    footerSupportSep: document.getElementById("footer-support-sep"),
+    footerVersion: document.getElementById("footer-version"),
+    footerNote: document.getElementById("footer-note"),
+    ganttChecklistModal: document.getElementById("gantt-checklist-modal"),
+    ganttChecklistModalTitle: document.getElementById(
+      "gantt-checklist-modal-title"
+    ),
+    ganttChecklistModalMeta: document.getElementById(
+      "gantt-checklist-modal-meta"
+    ),
+    ganttChecklistModalNote: document.getElementById(
+      "gantt-checklist-modal-note"
+    ),
+    ganttChecklistModalList: document.getElementById(
+      "gantt-checklist-modal-list"
+    ),
+    ganttChecklistOpenCard: document.getElementById(
+      "gantt-checklist-open-card"
+    ),
+    ganttChecklistModalClose: document.getElementById(
+      "gantt-checklist-modal-close"
+    ),
     groupField: document.getElementById("group-field"),
     calendarWrap: document.getElementById("calendar-wrap"),
+    insightWrap: document.getElementById("insight-wrap"),
     calendarGrid: document.getElementById("calendar-grid"),
     calendarTitle: document.getElementById("cal-title"),
     calendarUndated: document.getElementById("calendar-undated"),
@@ -110,7 +170,10 @@
     calPrev: document.getElementById("cal-prev"),
     calNext: document.getElementById("cal-next"),
     calToday: document.getElementById("cal-today"),
+    calModeMonth: document.getElementById("cal-mode-month"),
+    calModeWeek: document.getElementById("cal-mode-week"),
     assigneeSearch: document.getElementById("assignee-search"),
+    copyListBtn: document.getElementById("copy-list-btn"),
   };
 
   var prefs = prefsApi.loadPrefs();
@@ -121,11 +184,15 @@
     sortKey: prefs.sortKey || "due",
     sortDir: prefs.sortDir || "asc",
     groupBy: prefs.groupBy || "due",
-    view: prefs.view || "list",
-    workType: prefs.workType || "both",
+    view: prefs.view === "week" ? "calendar" : prefs.view || "list",
+    // workType kept for saved views; stage Hide cards is the live control.
+    workType: prefs.workType === "card" ? "card" : "both",
     showReminders: Boolean(prefs.showReminders),
     hideCompleted: prefs.hideCompleted !== false,
+    hideCards:
+      Boolean(prefs.hideCards) || prefs.workType === "checkitem",
     density: prefs.density === "compact" ? "compact" : "comfortable",
+    theme: prefs.theme === "dark" ? "dark" : "light",
     groupPageSize:
       prefs.groupPageSize === 0
         ? 0
@@ -136,6 +203,9 @@
           : 20,
     groupVisibleCounts: {},
     calendarMonth: startOfMonth(new Date()),
+    calendarWeekStart: null,
+    calendarMode:
+      prefs.view === "week" || prefs.calendarMode === "week" ? "week" : "month",
     expandedCalDay: null,
     focusCalDayAfterRender: null,
     collapsedGroups: prefs.collapsedGroups || {},
@@ -160,6 +230,8 @@
     preferredAssignees: null,
     assigneeDirectory: {},
     teamsContextNote: "",
+    selectedRowId: "",
+    visibleItems: [],
   };
 
   if (els.filterGroup) {
@@ -177,9 +249,36 @@
   if (els.filterHideCompleted) {
     els.filterHideCompleted.checked = state.hideCompleted;
   }
+  if (els.filterHideCards) {
+    els.filterHideCards.checked = state.hideCards;
+  }
+  if (els.filterDue) {
+    els.filterDue.value = "all";
+  }
+  if (els.viewSelect) {
+    els.viewSelect.value = state.view;
+  }
 
   function startOfMonth(date) {
     return new Date(date.getFullYear(), date.getMonth(), 1);
+  }
+
+  function addCalendarDays(date, days) {
+    var next = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    next.setDate(next.getDate() + days);
+    return next;
+  }
+
+  function startOfWeek(date) {
+    var day = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    var offset = (day.getDay() + 6) % 7;
+    day.setDate(day.getDate() - offset);
+    day.setHours(0, 0, 0, 0);
+    return day;
+  }
+
+  if (!state.calendarWeekStart) {
+    state.calendarWeekStart = startOfWeek(new Date());
   }
 
   function dateKey(date) {
@@ -200,8 +299,13 @@
     if (patch.workType != null) state.workType = next.workType;
     if (patch.showReminders != null) state.showReminders = next.showReminders;
     if (patch.hideCompleted != null) state.hideCompleted = next.hideCompleted;
+    if (patch.hideCards != null) state.hideCards = next.hideCards;
     if (patch.density != null) state.density = next.density;
+    if (patch.theme != null) state.theme = next.theme;
     if (patch.groupPageSize != null) state.groupPageSize = next.groupPageSize;
+    if (patch.calendarMode != null) {
+      state.calendarMode = next.calendarMode === "week" ? "week" : "month";
+    }
     if (patch.collapsedGroups != null) {
       state.collapsedGroups = next.collapsedGroups;
     }
@@ -234,6 +338,92 @@
 
   applyDensity(state.density);
 
+  var VIEW_OPTIONS = {
+    list: { label: "List", icon: "view_list" },
+    agenda: { label: "Agenda", icon: "view_agenda" },
+    horizon: { label: "Horizon", icon: "stacked_bar_chart" },
+    workload: { label: "Workload", icon: "group" },
+    progress: { label: "Card progress", icon: "donut_large" },
+    gantt: { label: "Gantt", icon: "view_timeline" },
+    calendar: { label: "Calendar", icon: "calendar_month" },
+  };
+
+  function closeViewMenu() {
+    if (!els.viewMenu || !els.viewMenuBtn) return;
+    els.viewMenu.hidden = true;
+    els.viewMenuBtn.setAttribute("aria-expanded", "false");
+    if (els.viewToggle) els.viewToggle.classList.remove("is-open");
+  }
+
+  function syncViewMenu() {
+    var key = state.view || "list";
+    var opt = VIEW_OPTIONS[key] || VIEW_OPTIONS.list;
+    if (els.viewSelect) els.viewSelect.value = key;
+    if (els.viewMenuIcon) els.viewMenuIcon.textContent = opt.icon;
+    if (els.viewMenuLabel) els.viewMenuLabel.textContent = opt.label;
+    if (els.viewMenuBtn) {
+      els.viewMenuBtn.title = "View: " + opt.label;
+      els.viewMenuBtn.setAttribute("aria-label", "View: " + opt.label);
+    }
+    if (els.viewMenu) {
+      els.viewMenu.querySelectorAll("[data-view]").forEach(function (btn) {
+        var selected = btn.getAttribute("data-view") === key;
+        btn.classList.toggle("is-active", selected);
+        btn.setAttribute("aria-selected", selected ? "true" : "false");
+      });
+    }
+  }
+
+  function setView(view) {
+    var next = view === "week" ? "calendar" : VIEW_OPTIONS[view] ? view : "list";
+    state.view = next;
+    if (view === "week") {
+      state.calendarMode = "week";
+      savePrefs({ view: state.view, calendarMode: "week" });
+    } else {
+      savePrefs({ view: state.view });
+    }
+    if (els.viewSelect) els.viewSelect.value = next;
+    syncViewMenu();
+    closeViewMenu();
+    renderTable();
+  }
+
+  function applyTheme(theme) {
+    state.theme = theme === "dark" ? "dark" : "light";
+    var dark = state.theme === "dark";
+    document.documentElement.setAttribute(
+      "data-theme",
+      dark ? "dark" : "light"
+    );
+    document.body.classList.toggle("theme-dark", dark);
+    if (els.themeToggle) {
+      els.themeToggle.setAttribute("aria-pressed", dark ? "true" : "false");
+      els.themeToggle.title = dark
+        ? "Switch to light mode"
+        : "Switch to dark mode";
+    }
+    if (els.themeToggleIcon) {
+      els.themeToggleIcon.textContent = dark ? "light_mode" : "dark_mode";
+    }
+    if (els.themeToggleLabel) {
+      els.themeToggleLabel.textContent = dark ? "Light mode" : "Dark mode";
+    }
+    if (els.themeToggleGroup) {
+      els.themeToggleGroup
+        .querySelectorAll("[data-theme]")
+        .forEach(function (btn) {
+          var active = btn.getAttribute("data-theme") === state.theme;
+          btn.classList.toggle("is-active", active);
+          btn.setAttribute("aria-pressed", active ? "true" : "false");
+        });
+    }
+  }
+
+  applyTheme(state.theme);
+  syncViewMenu();
+  updateViewChrome();
+
   function createDemoTrelloClient() {
     return {
       render: function (cb) {
@@ -257,22 +447,81 @@
   }
 
   var t =
-    isDemo || !window.TrelloPowerUp
-      ? createDemoTrelloClient()
-      : window.TrelloPowerUp.iframe({
-          appKey: (window.CHECKLIST_HUB_CONFIG &&
-            window.CHECKLIST_HUB_CONFIG.appKey) ||
-            config.appKey,
-          appName: (window.CHECKLIST_HUB_CONFIG &&
-            window.CHECKLIST_HUB_CONFIG.appName) ||
-            config.appName,
-          appAuthor: (window.CHECKLIST_HUB_CONFIG &&
-            window.CHECKLIST_HUB_CONFIG.appAuthor) ||
-            config.appAuthor,
-        });
+    powerUpMissing
+      ? null
+      : isDemo || !window.TrelloPowerUp
+        ? createDemoTrelloClient()
+        : window.TrelloPowerUp.iframe({
+            appKey: (window.CHECKLIST_HUB_CONFIG &&
+              window.CHECKLIST_HUB_CONFIG.appKey) ||
+              config.appKey,
+            appName: (window.CHECKLIST_HUB_CONFIG &&
+              window.CHECKLIST_HUB_CONFIG.appName) ||
+              config.appName,
+            appAuthor: (window.CHECKLIST_HUB_CONFIG &&
+              window.CHECKLIST_HUB_CONFIG.appAuthor) ||
+              config.appAuthor,
+          });
 
   if (isDemo) {
     document.body.classList.add("is-demo");
+  }
+
+  function oauthExpiration() {
+    var allowed = { "1hour": 1, "1day": 1, "30days": 1, never: 1 };
+    var value = (config && config.oauthExpiration) || "30days";
+    return allowed[value] ? value : "30days";
+  }
+
+  function safeCardUrl(url) {
+    if (demoMode && typeof demoMode.safeTrelloUrl === "function") {
+      return demoMode.safeTrelloUrl(url);
+    }
+    return null;
+  }
+
+  function openSafeCardUrl(url) {
+    var safe = safeCardUrl(url);
+    if (safe) window.open(safe, "_blank", "noopener,noreferrer");
+  }
+
+  function applySafeHref(anchor, url) {
+    if (demoMode && typeof demoMode.setSafeHref === "function") {
+      return demoMode.setSafeHref(anchor, url);
+    }
+    var safe = safeCardUrl(url);
+    if (!safe || !anchor) return false;
+    anchor.href = safe;
+    return true;
+  }
+
+  function initFooterMeta() {
+    if (els.footerVersion) {
+      els.footerVersion.textContent =
+        "v" + ((config && config.appVersion) || "1.0.1");
+    }
+    var email = (config && config.supportEmail) || "";
+    var url = (config && config.supportUrl) || "";
+    if (els.footerSupport) {
+      if (email) {
+        els.footerSupport.hidden = false;
+        if (els.footerSupportSep) els.footerSupportSep.hidden = false;
+        els.footerSupport.href = "mailto:" + email;
+        els.footerSupport.textContent = "Support";
+      } else if (url) {
+        els.footerSupport.hidden = false;
+        if (els.footerSupportSep) els.footerSupportSep.hidden = false;
+        els.footerSupport.href = url;
+        els.footerSupport.target = "_blank";
+        els.footerSupport.textContent = "Support";
+      }
+    }
+  }
+
+  initFooterMeta();
+
+  if (powerUpMissing) {
+    document.body.classList.add("is-powerup-missing");
   }
 
   function showBanner(message, kind, options) {
@@ -512,6 +761,15 @@
     return d;
   }
 
+  /** Next Mon–Fri after `from` (skips Sat/Sun). Friday → Monday. */
+  function nextWeekday(from) {
+    var d = startOfDay(from || new Date());
+    do {
+      d = new Date(d.getTime() + 24 * 60 * 60 * 1000);
+    } while (d.getDay() === 0 || d.getDay() === 6);
+    return d;
+  }
+
   function formatDue(due) {
     if (!due) return "—";
     var date = new Date(due);
@@ -524,8 +782,115 @@
     });
   }
 
-  function dueClass(due, stateValue) {
+  function itemActualDue(item) {
+    if (!item) return null;
+    if (isReminderRow(item)) return item.sourceDue || item.due || null;
+    return item.due || null;
+  }
+
+  function formatDueRelative(due, stateValue, item) {
+    if (!due) return "No date";
+    var date = new Date(due);
+    if (isNaN(date.getTime())) return "—";
+    if (stateValue === "complete") return formatDue(due);
+    var now = new Date();
+    var ts = date.getTime();
+    var startToday = startOfDay(now).getTime();
+    var endToday = endOfDay(now).getTime();
+    var hasTime = date.getHours() !== 0 || date.getMinutes() !== 0;
+    var time = date.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+    var reminder = isReminderRow(item);
+    if (reminder) {
+      var actual = itemActualDue(item);
+      var actualLabel = actual ? formatDue(actual) : formatDue(due);
+      var leadBit;
+      if (ts <= endToday) leadBit = "Reminded today";
+      else {
+        var nextWork = nextWeekday(now);
+        var nextStart = startOfDay(nextWork).getTime();
+        var nextEnd = endOfDay(nextWork).getTime();
+        if (ts >= nextStart && ts <= nextEnd) leadBit = "Reminded tomorrow";
+        else {
+          var daysOut = Math.round(
+            (startOfDay(date).getTime() - startToday) / 86400000
+          );
+          leadBit =
+            daysOut > 0 && daysOut < 7
+              ? "Reminded in " + daysOut + "d"
+              : "Reminder";
+        }
+      }
+      return leadBit + " · item due " + actualLabel;
+    }
+    if (ts < startToday) {
+      var days = Math.max(
+        1,
+        Math.round((startToday - startOfDay(date).getTime()) / 86400000)
+      );
+      return days === 1 ? "Overdue 1d" : "Overdue " + days + "d";
+    }
+    if (ts < now.getTime()) {
+      return hasTime ? "Overdue " + time : "Overdue today";
+    }
+    if (ts <= endToday) return hasTime ? "Today " + time : "Today";
+    var nextWorkday = nextWeekday(now);
+    var nextStartTs = startOfDay(nextWorkday).getTime();
+    var nextEndTs = endOfDay(nextWorkday).getTime();
+    if (ts >= nextStartTs && ts <= nextEndTs) {
+      return hasTime ? "Tomorrow " + time : "Tomorrow";
+    }
+    var daysAhead = Math.round(
+      (startOfDay(date).getTime() - startToday) / 86400000
+    );
+    if (daysAhead > 0 && daysAhead < 7) {
+      return hasTime ? "In " + daysAhead + "d · " + time : "In " + daysAhead + "d";
+    }
+    return formatDue(due);
+  }
+
+  function viewOwnsTime(view) {
+    // Views with their own time axis hide the due chips.
+    return (
+      view === "calendar" ||
+      view === "agenda" ||
+      view === "horizon" ||
+      view === "gantt"
+    );
+  }
+
+  function viewUsesHideCompleted(view) {
+    // These views either filter completes themselves or need them for meters.
+    return view === "list" || view === "agenda" || view === "calendar";
+  }
+
+  function viewUsesReminders(view) {
+    return view === "list" || view === "agenda" || view === "calendar";
+  }
+
+  function viewDropsCompleted(view) {
+    return view === "horizon" || view === "workload";
+  }
+
+  function isInsightView(view) {
+    return (
+      view === "agenda" ||
+      view === "horizon" ||
+      view === "workload" ||
+      view === "progress" ||
+      view === "gantt"
+    );
+  }
+
+  function dueClass(due, stateValue, item) {
     if (!due || stateValue === "complete") return "";
+    if (isReminderRow(item)) {
+      var reminderTs = new Date(due).getTime();
+      if (reminderTs <= endOfDay(new Date()).getTime()) return "due-today";
+      return "";
+    }
     var now = Date.now();
     var ts = new Date(due).getTime();
     if (ts < now) return "due-overdue";
@@ -557,7 +922,9 @@
    */
   function remindersVisible() {
     if (!remindersEnabled()) return false;
-    if (state.view === "calendar") return true;
+    if (state.view === "calendar" || state.view === "agenda") {
+      return true;
+    }
     if (state.groupBy === "due") return true;
     if (state.groupBy === "none" && state.sortKey === "due") return true;
     var due = els.filterDue ? els.filterDue.value : "all";
@@ -567,13 +934,28 @@
   /** List reminders only land in Due today / Due tomorrow (not week/later). */
   function reminderAllowedInList(item) {
     if (!isReminderRow(item)) return true;
-    if (state.view === "calendar") return true;
+    if (state.view === "calendar" || state.view === "agenda") {
+      return true;
+    }
     var bucket = dueBucket(item).id;
     return bucket === "today" || bucket === "tomorrow";
   }
 
   function isReminderRow(item) {
     return Boolean(item && (item.kind === "reminder" || item.isReminder));
+  }
+
+  /** Underlying work type — reminders are lead rows for a card or a task. */
+  function workKind(item) {
+    if (!item) return "checkitem";
+    if (isReminderRow(item)) {
+      return item.sourceKind === "card" ? "card" : "checkitem";
+    }
+    return item.kind === "card" ? "card" : "checkitem";
+  }
+
+  function isCardWork(item) {
+    return workKind(item) === "card";
   }
 
   function countReminderSplit(items) {
@@ -629,31 +1011,13 @@
   }
 
   function updateAssigneeVisibilityBanner() {
-    if (!state.data || !els.filterAssignee) return;
-    var people = selectedPeopleIds();
-    if (!people.length || isViewerOnlyAssignees()) {
-      if (
-        els.banner &&
-        !els.banner.hidden &&
-        els.banner.getAttribute("data-banner-kind") === "shared-boards"
-      ) {
-        showBanner(null);
-      }
-      return;
-    }
     if (
       els.banner &&
       !els.banner.hidden &&
-      (els.banner.getAttribute("data-banner-kind") === "privacy" ||
-        els.banner.getAttribute("data-banner-kind") === "error")
+      els.banner.getAttribute("data-banner-kind") === "shared-boards"
     ) {
-      return;
+      showBanner(null);
     }
-    showBanner(
-      "You only see tasks on boards you can access — typically boards shared with the people you selected.",
-      "info",
-      { dismissible: true, bannerKind: "shared-boards" }
-    );
   }
 
   function getCheckedValues(root) {
@@ -977,9 +1341,7 @@
     if (!state.data) return [];
     var items = state.data.items || [];
     var memberCards = state.data.memberCards || [];
-    var workType = state.workType;
-    if (workType === "checkitem") return items.slice();
-    if (workType === "card") return memberCards.slice();
+    // Cards are toggled with Hide cards; always collect both row kinds here.
     return items.concat(memberCards);
   }
 
@@ -1019,7 +1381,10 @@
       if (boards.indexOf(item.boardId) === -1) return false;
     }
 
-    if (state.hideCompleted && rowState !== "incomplete") return false;
+    if (state.hideCompleted && viewUsesHideCompleted(state.view) && rowState !== "incomplete") {
+      return false;
+    }
+    if (state.hideCards && isCardWork(item)) return false;
 
     var labels = els.filterLabel ? getCheckedValues(els.filterLabel) : [];
     if (labels.length) {
@@ -1035,8 +1400,8 @@
     var lists = els.filterList ? getCheckedValues(els.filterList) : [];
     if (lists.length && lists.indexOf(item.listId) === -1) return false;
 
-    // Calendar already lays work out by date; due chips/select would only hollow days.
-    if (due !== "all" && state.view !== "calendar") {
+    // Views that own their time axis ignore due chips so they are not hollowed out.
+    if (!state.bypassDue && due !== "all" && !viewOwnsTime(state.view)) {
       var dueTs = item.due ? new Date(item.due).getTime() : null;
       var now = new Date();
       if (due === "none" && dueTs) return false;
@@ -1049,7 +1414,12 @@
         if (!isOverdue && !isToday) return false;
       }
       if (due === "overdue") {
-        if (!dueTs || rowState === "complete" || dueTs >= now.getTime()) {
+        if (
+          isReminderRow(item) ||
+          !dueTs ||
+          rowState === "complete" ||
+          dueTs >= now.getTime()
+        ) {
           return false;
         }
       }
@@ -1062,18 +1432,28 @@
           return false;
         }
       }
+      if (due === "tomorrow") {
+        var nextDay = nextWeekday(now);
+        var tomorrowStart = startOfDay(nextDay).getTime();
+        var tomorrowEndDue = endOfDay(nextDay).getTime();
+        if (!dueTs || dueTs < tomorrowStart || dueTs > tomorrowEndDue) {
+          return false;
+        }
+      }
       if (due === "week") {
-        // Match dueBucket("week"): after end of tomorrow through end of day +7.
-        var tomorrowEnd = endOfDay(
-          new Date(now.getTime() + 24 * 60 * 60 * 1000)
-        ).getTime();
+        // After today, within 7 days, excluding the next-weekday "Tomorrow" day.
+        var nextDay = nextWeekday(now);
+        var nextStart = startOfDay(nextDay).getTime();
+        var nextEnd = endOfDay(nextDay).getTime();
+        var todayEnd = endOfDay(now).getTime();
         var weekEnd = endOfDay(
           new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
         ).getTime();
         if (
           !dueTs ||
           rowState === "complete" ||
-          dueTs <= tomorrowEnd ||
+          dueTs <= todayEnd ||
+          (dueTs >= nextStart && dueTs <= nextEnd) ||
           dueTs > weekEnd
         ) {
           return false;
@@ -1095,11 +1475,13 @@
         item.assigneeName,
         item.listName,
         labelNames,
-        item.kind === "card"
+        item.kind === "card" ||
+        (isReminderRow(item) && item.sourceKind === "card")
           ? "card member"
-          : item.kind === "reminder"
-            ? "reminder"
+          : isReminderRow(item)
+            ? "reminder checklist task"
             : "checklist task",
+        isReminderRow(item) ? "reminder" : "",
       ]
         .join(" ")
         .toLowerCase();
@@ -1197,8 +1579,8 @@
       av = av ? new Date(av).getTime() : Number.POSITIVE_INFINITY;
       bv = bv ? new Date(bv).getTime() : Number.POSITIVE_INFINITY;
     } else if (key === "kind") {
-      av = a.kind === "card" ? 1 : 0;
-      bv = b.kind === "card" ? 1 : 0;
+      av = isCardWork(a) ? 1 : 0;
+      bv = isCardWork(b) ? 1 : 0;
     } else {
       av = (av || "").toString().toLowerCase();
       bv = (bv || "").toString().toLowerCase();
@@ -1224,15 +1606,19 @@
     var ts = new Date(item.due).getTime();
     var now = new Date();
     if (ts < now.getTime()) {
+      if (isReminderRow(item)) {
+        // Lead-up notices are never overdue; keep them in Today.
+        return { id: "today", label: "Due today", order: 1 };
+      }
       return { id: "overdue", label: "Overdue", order: 0 };
     }
     if (ts <= endOfDay(now).getTime()) {
       return { id: "today", label: "Due today", order: 1 };
     }
-    var tomorrowEnd = endOfDay(
-      new Date(now.getTime() + 24 * 60 * 60 * 1000)
-    ).getTime();
-    if (ts <= tomorrowEnd) {
+    var nextWorkday = nextWeekday(now);
+    var nextStart = startOfDay(nextWorkday).getTime();
+    var nextEnd = endOfDay(nextWorkday).getTime();
+    if (ts >= nextStart && ts <= nextEnd) {
       return { id: "tomorrow", label: "Due tomorrow", order: 2 };
     }
     if (
@@ -1286,7 +1672,7 @@
       };
     }
     if (mode === "kind") {
-      var isCard = item.kind === "card";
+      var isCard = isCardWork(item);
       return {
         id: isCard ? "card" : "checkitem",
         label: isCard ? "Member card" : "Checklist task",
@@ -1323,11 +1709,30 @@
   }
 
   function typeLabel(item) {
-    if (isReminderRow(item)) return "Reminder";
-    return item.kind === "card" ? "Card" : "Task";
+    return isCardWork(item) ? "Card" : "Task";
+  }
+
+  function appendTypePills(host, item) {
+    var typePill = document.createElement("span");
+    typePill.className =
+      "type-pill " + (isCardWork(item) ? "is-card" : "is-task");
+    typePill.textContent = typeLabel(item);
+    host.appendChild(typePill);
+    if (isReminderRow(item)) {
+      var reminderPill = document.createElement("span");
+      reminderPill.className = "type-pill is-reminder";
+      reminderPill.textContent = "Reminder";
+      host.appendChild(reminderPill);
+    }
   }
 
   function boardHue(name) {
+    if (
+      window.ChecklistHubViews &&
+      typeof window.ChecklistHubViews.boardHue === "function"
+    ) {
+      return window.ChecklistHubViews.boardHue(name);
+    }
     var str = String(name || "board");
     var hash = 0;
     for (var i = 0; i < str.length; i += 1) {
@@ -1344,46 +1749,82 @@
     return span;
   }
 
+  function membershipCaptionFor(item) {
+    if (item.checklistItemCount != null && item.checklistName && item.checklistName.indexOf("You're on this card") === 0) {
+      return item.checklistName;
+    }
+    var stats = state.cardStatsAll && state.cardStatsAll[item.cardId];
+    if (!stats || !stats.total) return "You're on this card · no checklist items";
+    var lists = stats.lists || 0;
+    return (
+      "You're on this card · " +
+      (lists ? lists + " checklist" + (lists === 1 ? "" : "s") + " · " : "") +
+      stats.total +
+      " item" +
+      (stats.total === 1 ? "" : "s") +
+      " · none assigned to you"
+    );
+  }
+
+  function setTableVisible(show) {
+    if (!els.tableWrap) return;
+    els.tableWrap.hidden = !show;
+    els.tableWrap.classList.toggle("is-shown", Boolean(show));
+  }
+
+  function createFallbackRow(item) {
+    var tr = document.createElement("tr");
+    var td = document.createElement("td");
+    td.colSpan = 6;
+    td.textContent =
+      (item && item.name) || "Untitled item";
+    tr.appendChild(td);
+    return tr;
+  }
+
   function createItemRow(item) {
     var tr = document.createElement("tr");
     var rowState = itemState(item);
+    tr.classList.add("hub-row");
+    tr.setAttribute("data-row-id", item.id);
+    if (state.selectedRowId === item.id) tr.classList.add("is-selected");
     if (rowState === "complete") tr.classList.add("is-complete");
     if (isReminderRow(item)) tr.classList.add("is-reminder");
-
-    var typeTd = document.createElement("td");
-    typeTd.className = "col-type";
-    var pill = document.createElement("span");
-    pill.className =
-      "type-pill" +
-      (item.kind === "card" ? " is-card" : "") +
-      (isReminderRow(item) ? " is-reminder" : "");
-    pill.textContent = typeLabel(item);
-    typeTd.appendChild(pill);
+    if (isCardWork(item)) tr.classList.add("is-card");
 
     var nameTd = document.createElement("td");
     nameTd.className = "col-item";
     var nameWrap = document.createElement("div");
     nameWrap.className = "item-name";
+    appendTypePills(nameWrap, item);
     if (item.cardUrl) {
       var nameLink = document.createElement("a");
       nameLink.className = "item-name-link";
-      nameLink.href = item.cardUrl;
       nameLink.target = "_blank";
       nameLink.rel = "noopener noreferrer";
       nameLink.textContent = item.name;
-      nameWrap.appendChild(nameLink);
+      if (applySafeHref(nameLink, item.cardUrl)) {
+        nameWrap.appendChild(nameLink);
+      } else {
+        nameWrap.appendChild(document.createTextNode(item.name));
+      }
     } else {
-      nameWrap.textContent = item.name;
+      nameWrap.appendChild(document.createTextNode(item.name));
     }
     var meta = document.createElement("div");
     meta.className = "item-meta";
+    var metaBits = [];
     if (isReminderRow(item)) {
-      meta.textContent =
-        "Due " +
-        (item.sourceDue ? formatDue(item.sourceDue) : formatDue(item.due));
-    } else {
-      meta.textContent = item.checklistName || "";
+      metaBits.push(
+        "Item due " +
+          formatDue(itemActualDue(item) || item.due)
+      );
+    } else if (isCardWork(item) && !isReminderRow(item)) {
+      metaBits.push(membershipCaptionFor(item));
+    } else if (!isReminderRow(item) && item.checklistName) {
+      metaBits.push(item.checklistName);
     }
+    meta.textContent = metaBits.join(" · ");
     nameTd.appendChild(nameWrap);
     nameTd.appendChild(meta);
     var mobileBits = [];
@@ -1439,14 +1880,26 @@
     assigneeTd.textContent = item.assigneeName || "—";
 
     var dueTd = document.createElement("td");
-    dueTd.className = "col-due " + dueClass(item.due, rowState);
-    dueTd.textContent = formatDue(item.due);
+    dueTd.className = "col-due " + dueClass(item.due, rowState, item);
+    var dueText = document.createElement("span");
+    dueText.textContent = formatDueRelative(item.due, rowState, item);
+    if (isReminderRow(item)) {
+      var actualDue = itemActualDue(item);
+      dueText.title = actualDue
+        ? "Item due " +
+          formatDue(actualDue) +
+          " · reminder lead " +
+          formatDue(item.due)
+        : formatDue(item.due);
+    } else {
+      dueText.title = item.due ? formatDue(item.due) : "No due date";
+    }
+    dueTd.appendChild(dueText);
 
     var linkTd = document.createElement("td");
     linkTd.className = "col-link";
     if (item.cardUrl) {
       var a = document.createElement("a");
-      a.href = item.cardUrl;
       a.target = "_blank";
       a.rel = "noopener noreferrer";
       a.className = "link-open";
@@ -1458,12 +1911,15 @@
         "aria-label",
         "Open card " + (item.cardName || item.name || "") + " in Trello"
       );
-      linkTd.appendChild(a);
+      if (applySafeHref(a, item.cardUrl)) {
+        linkTd.appendChild(a);
+      } else {
+        linkTd.textContent = "—";
+      }
     } else {
       linkTd.textContent = "—";
     }
 
-    tr.appendChild(typeTd);
     tr.appendChild(nameTd);
     tr.appendChild(boardTd);
     tr.appendChild(cardTd);
@@ -1484,7 +1940,7 @@
       });
     els.filterDue.value = dueValue;
 
-    var counts = { overdue: 0, today: 0, week: 0, myday: 0 };
+    var counts = { overdue: 0, today: 0, tomorrow: 0, week: 0, myday: 0 };
     var now = new Date();
     var dayStart = startOfDay(now).getTime();
     var dayEnd = endOfDay(now).getTime();
@@ -1503,6 +1959,7 @@
       var key = chip.getAttribute("data-due-chip");
       var active = els.filterDue.value === key;
       chip.classList.toggle("is-active", active);
+      chip.classList.toggle("chip-emphasis", active);
       chip.setAttribute("aria-pressed", active ? "true" : "false");
       if (key === "all") {
         chip.textContent = "All dates";
@@ -1514,6 +1971,8 @@
         chip.textContent = "Overdue (" + counts.overdue + ")";
       } else if (key === "today") {
         chip.textContent = "Today (" + counts.today + ")";
+      } else if (key === "tomorrow") {
+        chip.textContent = "Tomorrow (" + counts.tomorrow + ")";
       } else if (key === "week") {
         chip.textContent = "Next 7 days (" + counts.week + ")";
       }
@@ -1559,19 +2018,28 @@
     scroll.className = "cal-expand-scroll";
     var table = document.createElement("table");
     table.className = "items-table cal-expand-table";
-    table.innerHTML =
-      '<caption class="sr-only">Tasks due ' +
-      String(dayLabel || "").replace(/</g, "") +
-      "</caption>" +
-      "<thead><tr>" +
-      '<th class="col-type" scope="col">Type</th>' +
-      '<th class="col-item" scope="col">Title</th>' +
-      '<th class="col-board" scope="col">Board</th>' +
-      '<th class="col-card" scope="col">Card</th>' +
-      '<th class="col-assignee" scope="col">Assignee</th>' +
-      '<th class="col-due" scope="col">Due</th>' +
-      '<th class="col-link" scope="col">Open</th>' +
-      "</tr></thead>";
+    var caption = document.createElement("caption");
+    caption.className = "sr-only";
+    caption.textContent = "Tasks due " + String(dayLabel || "");
+    table.appendChild(caption);
+    var thead = document.createElement("thead");
+    var headRow = document.createElement("tr");
+    [
+      ["col-item", "Title"],
+      ["col-board", "Board"],
+      ["col-card", "Card"],
+      ["col-assignee", "Assignee"],
+      ["col-due", "Due"],
+      ["col-link", "Open"],
+    ].forEach(function (pair) {
+      var th = document.createElement("th");
+      th.className = pair[0];
+      th.scope = "col";
+      th.textContent = pair[1];
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
     var tbody = document.createElement("tbody");
     dayItems.sort(compareItems).forEach(function (item) {
       tbody.appendChild(createItemRow(item));
@@ -1582,21 +2050,62 @@
     return wrap;
   }
 
+  function syncCalendarModeControls() {
+    var mode = state.calendarMode === "week" ? "week" : "month";
+    state.calendarMode = mode;
+    if (els.calModeMonth) {
+      els.calModeMonth.classList.toggle("is-active", mode === "month");
+      els.calModeMonth.setAttribute(
+        "aria-pressed",
+        mode === "month" ? "true" : "false"
+      );
+    }
+    if (els.calModeWeek) {
+      els.calModeWeek.classList.toggle("is-active", mode === "week");
+      els.calModeWeek.setAttribute(
+        "aria-pressed",
+        mode === "week" ? "true" : "false"
+      );
+    }
+    if (els.calPrev) {
+      els.calPrev.setAttribute(
+        "aria-label",
+        mode === "week" ? "Previous week" : "Previous month"
+      );
+    }
+    if (els.calNext) {
+      els.calNext.setAttribute(
+        "aria-label",
+        mode === "week" ? "Next week" : "Next month"
+      );
+    }
+    if (els.calendarWrap) {
+      els.calendarWrap.setAttribute("data-cal-mode", mode);
+    }
+  }
+
+  function setCalendarMode(mode) {
+    var next = mode === "week" ? "week" : "month";
+    if (next === "week") {
+      var anchor = state.expandedCalDay
+        ? new Date(state.expandedCalDay + "T12:00:00")
+        : state.calendarMonth || new Date();
+      state.calendarWeekStart = startOfWeek(anchor);
+    } else {
+      var weekAnchor = state.calendarWeekStart || new Date();
+      state.calendarMonth = startOfMonth(weekAnchor);
+    }
+    state.calendarMode = next;
+    savePrefs({ calendarMode: next });
+    syncCalendarModeControls();
+    if (state.view === "calendar") renderTable();
+  }
+
   function renderCalendar(filtered) {
-    var month = state.calendarMonth;
-    var year = month.getFullYear();
-    var monthIndex = month.getMonth();
-    els.calendarTitle.textContent = month.toLocaleString(undefined, {
-      month: "long",
-      year: "numeric",
-    });
-
-    var firstDay = new Date(year, monthIndex, 1);
-    var startOffset = (firstDay.getDay() + 6) % 7;
-    var daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+    syncCalendarModeControls();
+    var isWeek = state.calendarMode === "week";
     var todayKey = dateKey(new Date());
-    var MAX_PREVIEW = state.density === "compact" ? 2 : 3;
-
+    var maxDayCount = 1;
     var byDay = {};
     var undated = [];
     filtered.forEach(function (item) {
@@ -1607,27 +2116,72 @@
       var key = dateKey(new Date(item.due));
       if (!byDay[key]) byDay[key] = [];
       byDay[key].push(item);
+      if (byDay[key].length > maxDayCount) maxDayCount = byDay[key].length;
     });
 
-    // Drop expansion if that day is no longer in this month view.
-    if (state.expandedCalDay) {
-      var expandedDate = new Date(state.expandedCalDay + "T12:00:00");
-      if (
-        expandedDate.getMonth() !== monthIndex ||
-        expandedDate.getFullYear() !== year
-      ) {
-        state.expandedCalDay = null;
+    var year;
+    var monthIndex;
+    var startOffset = 0;
+    var daysInMonth = 0;
+    var totalCells;
+    var weekStart;
+
+    if (isWeek) {
+      weekStart = startOfWeek(state.calendarWeekStart || new Date());
+      state.calendarWeekStart = weekStart;
+      var weekEnd = addCalendarDays(weekStart, 6);
+      els.calendarTitle.textContent =
+        weekStart.toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+        }) +
+        " – " +
+        weekEnd.toLocaleDateString(undefined, {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+        });
+      totalCells = 7;
+      if (state.expandedCalDay) {
+        var expandedTs = new Date(state.expandedCalDay + "T12:00:00").getTime();
+        if (
+          expandedTs < weekStart.getTime() ||
+          expandedTs > weekEnd.getTime() + 24 * 60 * 60 * 1000 - 1
+        ) {
+          state.expandedCalDay = null;
+        }
+      }
+    } else {
+      var month = state.calendarMonth;
+      year = month.getFullYear();
+      monthIndex = month.getMonth();
+      els.calendarTitle.textContent = month.toLocaleString(undefined, {
+        month: "long",
+        year: "numeric",
+      });
+      var firstDay = new Date(year, monthIndex, 1);
+      startOffset = (firstDay.getDay() + 6) % 7;
+      daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+      totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
+      if (state.expandedCalDay) {
+        var expandedDate = new Date(state.expandedCalDay + "T12:00:00");
+        if (
+          expandedDate.getMonth() !== monthIndex ||
+          expandedDate.getFullYear() !== year
+        ) {
+          state.expandedCalDay = null;
+        }
       }
     }
 
     els.calendarGrid.innerHTML = "";
-    els.calendarGrid.className = "calendar-grid calendar-grid-weeks";
+    els.calendarGrid.className =
+      "calendar-grid calendar-grid-weeks" + (isWeek ? " is-week-mode" : "");
 
-    var totalCells = Math.ceil((startOffset + daysInMonth) / 7) * 7;
     var weekEl = null;
     var weekDaysEl = null;
 
-    function startWeek() {
+    function startWeekRow() {
       weekEl = document.createElement("div");
       weekEl.className = "cal-week";
       weekDaysEl = document.createElement("div");
@@ -1636,28 +2190,17 @@
       els.calendarGrid.appendChild(weekEl);
     }
 
-    startWeek();
-
-    for (var i = 0; i < totalCells; i += 1) {
-      if (i > 0 && i % 7 === 0) {
-        startWeek();
-      }
-
-      var dayNum = i - startOffset + 1;
-      var cell = document.createElement("div");
-      cell.className = "cal-day";
-
-      if (dayNum < 1 || dayNum > daysInMonth) {
-        cell.classList.add("is-outside");
-        weekDaysEl.appendChild(cell);
-        continue;
-      }
-
-      var current = new Date(year, monthIndex, dayNum);
+    function appendDayCell(current, inMonth) {
       var key = dateKey(current);
       var dayItems = byDay[key] || [];
       var isExpanded = state.expandedCalDay === key;
-
+      var cell = document.createElement("div");
+      cell.className = "cal-day";
+      if (!inMonth) {
+        cell.classList.add("is-outside");
+        weekDaysEl.appendChild(cell);
+        return cell;
+      }
       if (key === todayKey) cell.classList.add("is-today");
       if (dayItems.length) cell.classList.add("has-items");
       if (isExpanded) cell.classList.add("is-expanded");
@@ -1679,10 +2222,7 @@
       cell.setAttribute("role", "button");
       cell.setAttribute("tabindex", "0");
       cell.setAttribute("data-day-key", key);
-      cell.setAttribute(
-        "aria-expanded",
-        isExpanded ? "true" : "false"
-      );
+      cell.setAttribute("aria-expanded", isExpanded ? "true" : "false");
       cell.setAttribute(
         "aria-label",
         current.toLocaleDateString(undefined, {
@@ -1699,7 +2239,7 @@
       var heading = document.createElement("div");
       heading.className = "cal-day-num";
       var numSpan = document.createElement("span");
-      numSpan.textContent = String(dayNum);
+      numSpan.textContent = String(current.getDate());
       heading.appendChild(numSpan);
       if (dayItems.length) {
         var countBadge = document.createElement("span");
@@ -1713,79 +2253,97 @@
       heading.appendChild(chevron);
       cell.appendChild(heading);
 
-      var list = document.createElement("div");
-      list.className = "cal-day-items";
-      dayItems.slice(0, MAX_PREVIEW).forEach(function (item) {
-        var node = document.createElement("div");
-        node.className =
-          "cal-item" +
-          (dueBucket(item).id === "overdue" ? " is-overdue" : "") +
-          (itemState(item) === "complete" ? " is-complete" : "") +
-          (isReminderRow(item) ? " is-reminder" : "");
-        var dot = document.createElement("span");
-        dot.className = "cal-item-dot";
-        dot.style.backgroundColor =
-          "hsl(" + boardHue(item.boardName) + " 42% 48%)";
-        dot.title = item.boardName || "Board";
-        var text = document.createElement("span");
-        text.className = "cal-item-text";
-        text.textContent =
-          (isReminderRow(item)
-            ? "Reminder · "
-            : item.kind === "card"
-              ? "Card · "
-              : "") + item.name;
-        node.appendChild(dot);
-        node.appendChild(text);
-        node.title =
-          (item.boardName || "Board") +
-          (item.assigneeName ? " · " + item.assigneeName : "") +
-          " — click day for details";
-        list.appendChild(node);
-      });
-      if (dayItems.length > MAX_PREVIEW) {
-        var more = document.createElement("div");
-        more.className = "cal-more";
-        more.innerHTML =
-          '<span class="cal-more-icon" aria-hidden="true"></span>' +
-          '<span>+' +
-          (dayItems.length - MAX_PREVIEW) +
-          " more</span>";
-        list.appendChild(more);
+      if (dayItems.length) {
+        var load = document.createElement("div");
+        load.className = "cal-load";
+        var fill = document.createElement("span");
+        fill.className = "cal-load-fill";
+        var overdueDay = dayItems.filter(function (item) {
+          return dueBucket(item).id === "overdue";
+        }).length;
+        if (overdueDay) fill.classList.add("is-overdue");
+        fill.style.height =
+          Math.max(18, Math.round((dayItems.length / maxDayCount) * 100)) + "%";
+        load.appendChild(fill);
+        var loadLabel = document.createElement("span");
+        loadLabel.className =
+          "cal-load-label" + (overdueDay ? " is-overdue" : "");
+        loadLabel.textContent = countText;
+        load.appendChild(loadLabel);
+        cell.appendChild(load);
       }
-      cell.appendChild(list);
 
-      cell.addEventListener("click", function (dayKey) {
-        return function () {
-          state.expandedCalDay =
-            state.expandedCalDay === dayKey ? null : dayKey;
-          state.focusCalDayAfterRender = dayKey;
-          renderTable();
-        };
-      }(key));
-      cell.addEventListener("keydown", function (dayKey) {
-        return function (event) {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
+      cell.addEventListener(
+        "click",
+        (function (dayKey) {
+          return function () {
             state.expandedCalDay =
               state.expandedCalDay === dayKey ? null : dayKey;
             state.focusCalDayAfterRender = dayKey;
             renderTable();
-          }
-        };
-      }(key));
+          };
+        })(key)
+      );
+      cell.addEventListener(
+        "keydown",
+        (function (dayKey) {
+          return function (event) {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              state.expandedCalDay =
+                state.expandedCalDay === dayKey ? null : dayKey;
+              state.focusCalDayAfterRender = dayKey;
+              renderTable();
+            }
+          };
+        })(key)
+      );
 
       weekDaysEl.appendChild(cell);
+      return cell;
+    }
 
-      // After finishing a week that contains the expanded day, insert detail row.
+    startWeekRow();
+
+    for (var i = 0; i < totalCells; i += 1) {
+      if (!isWeek && i > 0 && i % 7 === 0) {
+        startWeekRow();
+      }
+
+      var current;
+      var inMonth = true;
+      if (isWeek) {
+        current = addCalendarDays(weekStart, i);
+      } else {
+        var dayNum = i - startOffset + 1;
+        current = new Date(year, monthIndex, dayNum);
+        inMonth = dayNum >= 1 && dayNum <= daysInMonth;
+      }
+
+      appendDayCell(current, inMonth);
+
       if ((i + 1) % 7 === 0 && state.expandedCalDay) {
         var expandedInWeek = false;
-        for (var d = i - 6; d <= i; d += 1) {
-          var dn = d - startOffset + 1;
-          if (dn < 1 || dn > daysInMonth) continue;
-          if (dateKey(new Date(year, monthIndex, dn)) === state.expandedCalDay) {
-            expandedInWeek = true;
-            break;
+        var w;
+        if (isWeek) {
+          for (w = 0; w < 7; w += 1) {
+            if (
+              dateKey(addCalendarDays(weekStart, w)) === state.expandedCalDay
+            ) {
+              expandedInWeek = true;
+              break;
+            }
+          }
+        } else {
+          for (var d = i - 6; d <= i; d += 1) {
+            var dn = d - startOffset + 1;
+            if (dn < 1 || dn > daysInMonth) continue;
+            if (
+              dateKey(new Date(year, monthIndex, dn)) === state.expandedCalDay
+            ) {
+              expandedInWeek = true;
+              break;
+            }
           }
         }
         if (expandedInWeek) {
@@ -1811,15 +2369,13 @@
       if (els.calendarUndatedText) {
         els.calendarUndatedText.textContent =
           undated.length +
-          " matching item" +
-          (undated.length === 1 ? "" : "s") +
-          " have no due date.";
+          " undated item" +
+          (undated.length === 1 ? "" : "s");
       } else {
         els.calendarUndated.textContent =
           undated.length +
-          " matching item" +
-          (undated.length === 1 ? "" : "s") +
-          " have no due date.";
+          " undated item" +
+          (undated.length === 1 ? "" : "s");
       }
     } else {
       els.calendarUndated.hidden = true;
@@ -1841,26 +2397,39 @@
   }
 
   function updateViewChrome() {
-    var isCalendar = state.view === "calendar";
-    if (els.viewToggle) {
-      els.viewToggle.querySelectorAll(".view-btn").forEach(function (btn) {
-        var active = btn.getAttribute("data-view") === state.view;
-        btn.classList.toggle("is-active", active);
-        btn.setAttribute("aria-pressed", active ? "true" : "false");
-      });
-    }
+    var ownsTime = viewOwnsTime(state.view);
+    var insight = isInsightView(state.view);
+    syncViewMenu();
     if (els.groupField) {
-      els.groupField.hidden = isCalendar;
+      els.groupField.hidden = state.view !== "list";
     }
     if (els.groupPageSizeField) {
-      els.groupPageSizeField.hidden = isCalendar;
+      els.groupPageSizeField.hidden = state.view !== "list";
     }
     if (els.focusChips) {
-      els.focusChips.hidden = isCalendar;
+      els.focusChips.hidden = ownsTime;
     }
-    if (els.filterDue && els.filterDue.closest) {
-      var dueField = els.filterDue.closest(".field");
-      if (dueField) dueField.hidden = isCalendar;
+    if (els.insightWrap && !insight) {
+      els.insightWrap.hidden = true;
+    }
+
+    var hideCompletedOn = viewUsesHideCompleted(state.view);
+    var remindersOn = viewUsesReminders(state.view);
+    if (els.stageHideCompleted) {
+      els.stageHideCompleted.hidden = !hideCompletedOn;
+      var hideCompletedInput = els.filterHideCompleted;
+      if (hideCompletedInput) {
+        hideCompletedInput.disabled = !hideCompletedOn;
+      }
+    }
+    if (els.stageReminders) {
+      els.stageReminders.hidden = !remindersOn;
+      if (els.filterReminders) {
+        els.filterReminders.disabled = !remindersOn;
+      }
+    }
+    if (els.stageHideCards) {
+      els.stageHideCards.hidden = false;
     }
   }
 
@@ -1873,11 +2442,33 @@
     }
 
     var allRows = collectRows();
+    state.cardStatsAll = {};
+    (state.data.items || []).forEach(function (item) {
+      if (!item.cardId || isReminderRow(item)) return;
+      if (!state.cardStatsAll[item.cardId]) {
+        state.cardStatsAll[item.cardId] = { total: 0, lists: 0, seen: {} };
+      }
+      var stats = state.cardStatsAll[item.cardId];
+      stats.total += 1;
+      if (item.checklistId && !stats.seen[item.checklistId]) {
+        stats.seen[item.checklistId] = true;
+        stats.lists += 1;
+      }
+    });
     var filtered = allRows.filter(matchesFilters).sort(compareItems);
-    var overdue = filtered.filter(function (item) {
+    state.visibleItems = filtered;
+
+    var counted = filtered.filter(function (item) {
+      if (!viewUsesReminders(state.view) && isReminderRow(item)) return false;
+      if (viewDropsCompleted(state.view) && itemState(item) !== "incomplete") {
+        return false;
+      }
+      return true;
+    });
+    var overdue = counted.filter(function (item) {
       return !isReminderRow(item) && dueBucket(item).id === "overdue";
     }).length;
-    var split = countReminderSplit(filtered);
+    var split = countReminderSplit(counted);
     var realLoaded = countReminderSplit(allRows).real;
 
     els.resultCount.textContent =
@@ -1899,27 +2490,57 @@
     updateFilterSummary();
     updateScanNudge();
     updateAssigneeVisibilityBanner();
+    updateAuxButtons(filtered);
 
+    var insight = isInsightView(state.view);
     var isEmpty = !filtered.length;
-    els.emptyState.hidden = !isEmpty;
-    if (isEmpty) setEmptyCopy("filtered");
+    els.emptyState.hidden = insight || !isEmpty;
+    if (isEmpty && !insight) setEmptyCopy("filtered");
 
     if (state.view === "calendar") {
-      els.tableWrap.hidden = true;
+      setTableVisible(false);
+      if (els.insightWrap) els.insightWrap.hidden = true;
       els.calendarWrap.hidden = false;
       renderCalendar(filtered);
       return;
     }
 
+    if (insight) {
+      setTableVisible(false);
+      els.calendarWrap.hidden = true;
+      if (els.insightWrap) {
+        els.insightWrap.hidden = false;
+        renderInsight(filtered);
+      }
+      return;
+    }
+
     els.calendarWrap.hidden = true;
-    els.tableWrap.hidden = false;
+    if (els.insightWrap) els.insightWrap.hidden = true;
+    setTableVisible(true);
+    els.emptyState.hidden = !filtered.length ? false : true;
     els.itemsBody.innerHTML = "";
 
-    if (isEmpty) return;
+    if (!filtered.length) {
+      setEmptyCopy("filtered");
+      return;
+    }
 
     var frag = document.createDocumentFragment();
     var groups = buildGroups(filtered);
     var showGroups = state.groupBy !== "none";
+    if (showGroups) {
+      var hidingEveryItem = groups.length > 0;
+      groups.forEach(function (group) {
+        if (!state.collapsedGroups[group.id]) hidingEveryItem = false;
+      });
+      if (hidingEveryItem) {
+        groups.forEach(function (group) {
+          state.collapsedGroups[group.id] = false;
+        });
+      }
+    }
+    var appended = 0;
 
     groups.forEach(function (group) {
       if (showGroups) {
@@ -1927,49 +2548,58 @@
         header.className = "group-row";
         var collapsed = Boolean(state.collapsedGroups[group.id]);
         header.classList.toggle("is-collapsed", collapsed);
-        var cell = document.createElement("td");
-        cell.colSpan = 7;
+        // Column-group header so AT treat this as a section label, not a data cell.
+        var cell = document.createElement("th");
+        cell.colSpan = 6;
+        cell.scope = "colgroup";
+        // h2 > button matches accordion heading pattern (h1 is the hub title).
+        var heading = document.createElement("h2");
+        heading.className = "group-heading";
         var btn = document.createElement("button");
         btn.type = "button";
         btn.className = "group-toggle";
         btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
-        btn.innerHTML =
-          '<span class="group-caret" aria-hidden="true"></span>' +
-          '<span class="group-label"></span>' +
-          '<span class="group-count"></span>';
-        btn.querySelector(".group-label").textContent = group.label;
+        var caret = document.createElement("span");
+        caret.className = "group-caret";
+        caret.setAttribute("aria-hidden", "true");
+        var label = document.createElement("span");
+        label.className = "group-label";
+        label.textContent = group.label;
+        var count = document.createElement("span");
+        count.className = "group-count";
         var limit = visibleCountForGroup(group.id, group.items.length);
-        var split = countReminderSplit(group.items);
+        var groupSplit = countReminderSplit(group.items);
         var countLabel =
-          split.real +
-          (split.real === 1 ? " item" : " items") +
-          (split.reminders
-            ? " · " +
-              split.reminders +
-              " reminder" +
-              (split.reminders === 1 ? "" : "s")
+          String(groupSplit.real) +
+          (groupSplit.reminders
+            ? " · " + groupSplit.reminders + " rem."
             : "");
         if (state.groupPageSize && limit < group.items.length) {
-          countLabel =
-            "showing " +
-            limit +
-            " of " +
-            group.items.length +
-            (split.reminders
-              ? " (" +
-                split.real +
-                " · " +
-                split.reminders +
-                "r)"
-              : "");
+          countLabel = limit + "/" + group.items.length;
         }
-        btn.querySelector(".group-count").textContent = countLabel;
+        count.textContent = countLabel;
+        count.title =
+          groupSplit.real +
+          (groupSplit.real === 1 ? " item" : " items") +
+          (groupSplit.reminders
+            ? ", " +
+              groupSplit.reminders +
+              " reminder" +
+              (groupSplit.reminders === 1 ? "" : "s")
+            : "") +
+          (state.groupPageSize && limit < group.items.length
+            ? " (showing " + limit + ")"
+            : "");
+        btn.appendChild(caret);
+        btn.appendChild(label);
+        btn.appendChild(count);
         btn.addEventListener("click", function () {
           state.collapsedGroups[group.id] = !state.collapsedGroups[group.id];
           savePrefs({ collapsedGroups: state.collapsedGroups });
           renderViews();
         });
-        cell.appendChild(btn);
+        heading.appendChild(btn);
+        cell.appendChild(heading);
         header.appendChild(cell);
         frag.appendChild(header);
 
@@ -1978,7 +2608,13 @@
 
       var visibleLimit = visibleCountForGroup(group.id, group.items.length);
       for (var gi = 0; gi < visibleLimit; gi += 1) {
-        frag.appendChild(createItemRow(group.items[gi]));
+        try {
+          frag.appendChild(createItemRow(group.items[gi]));
+          appended += 1;
+        } catch (err) {
+          frag.appendChild(createFallbackRow(group.items[gi]));
+          appended += 1;
+        }
       }
 
       var remaining = group.items.length - visibleLimit;
@@ -1986,7 +2622,7 @@
         var moreRow = document.createElement("tr");
         moreRow.className = "group-more-row";
         var moreCell = document.createElement("td");
-        moreCell.colSpan = 7;
+        moreCell.colSpan = 6;
         var moreBtn = document.createElement("button");
         moreBtn.type = "button";
         moreBtn.className = "group-more-btn";
@@ -2019,8 +2655,108 @@
     els.itemsBody.appendChild(frag);
   }
 
+  function renderInsight(filtered) {
+    if (!els.insightWrap) return;
+    if (!window.ChecklistHubViews) {
+      els.insightWrap.innerHTML = "";
+      var missing = document.createElement("p");
+      missing.className = "insight-note";
+      missing.textContent =
+        "This view did not load. Hard-refresh the page and try again.";
+      els.insightWrap.appendChild(missing);
+      return;
+    }
+    try {
+      window.ChecklistHubViews.render(state.view, els.insightWrap, filtered, {
+      now: new Date(),
+      selectedId: state.selectedRowId,
+      formatDue: formatDue,
+      formatRelative: formatDueRelative,
+      dueBucket: dueBucket,
+      itemState: itemState,
+      isReminder: isReminderRow,
+      workKind: workKind,
+      dateKey: dateKey,
+      remindersOn: remindersEnabled,
+      onSelect: function (id) {
+        state.selectedRowId = id;
+        highlightSelectedRow();
+      },
+      onOpen: function (item) {
+        if (item && item.cardUrl) {
+          openSafeCardUrl(item.cardUrl);
+        }
+      },
+      onChecklistDetail: function (checklist) {
+        openGanttChecklistModal(checklist);
+      },
+    });
+    } catch (err) {
+      els.insightWrap.innerHTML = "";
+      var failed = document.createElement("p");
+      failed.className = "insight-note";
+      failed.textContent =
+        "This view could not be drawn. Hard-refresh and try again.";
+      els.insightWrap.appendChild(failed);
+    }
+  }
+
+  function highlightSelectedRow() {
+    document.querySelectorAll(".hub-row").forEach(function (row) {
+      row.classList.toggle(
+        "is-selected",
+        row.getAttribute("data-row-id") === state.selectedRowId
+      );
+    });
+  }
+
+  function updateAuxButtons(filtered) {
+    if (els.copyListBtn) {
+      els.copyListBtn.hidden = !state.data;
+      els.copyListBtn.disabled = !filtered.length;
+    }
+  }
+
+  function copyVisibleList() {
+    var rows = state.visibleItems || [];
+    if (!rows.length) return;
+    var lines = ["# Checklist Hub"];
+    rows.forEach(function (item) {
+      if (isReminderRow(item)) return;
+      var due = formatDueRelative(item.due, itemState(item));
+      var bits = [item.cardName, item.boardName, due].filter(Boolean);
+      var box = itemState(item) === "complete" ? "x" : " ";
+      lines.push("- [" + box + "] " + item.name + (bits.length ? " — " + bits.join(" · ") : ""));
+      if (item.cardUrl) lines.push("  " + item.cardUrl);
+    });
+    var text = lines.join("\n");
+    var done = function () {
+      showBanner("Copied " + (lines.length - 1) + " lines.", "info", {
+        dismissible: true,
+      });
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function () {
+        showBanner("Could not copy the list.", "warn", { dismissible: true });
+      });
+      return;
+    }
+    showBanner("Copy is not available in this browser.", "warn", { dismissible: true });
+  }
+
+  var renderFrame = 0;
   function renderTable() {
-    renderViews();
+    if (renderFrame) return;
+    renderFrame = window.requestAnimationFrame
+      ? window.requestAnimationFrame(function () {
+          renderFrame = 0;
+          renderViews();
+        })
+      : (setTimeout(function () {
+          renderFrame = 0;
+          renderViews();
+        }, 0),
+        1);
   }
 
   function populateSavedViews() {
@@ -2128,7 +2864,9 @@
     var parsed = parseWelcomeStarter(
       els.welcomeStarter && els.welcomeStarter.value
     );
-    els.welcomeStarterLoad.disabled = parsed.kind === "none";
+    var hasBoards = getAllowlistBoardIds().length > 0;
+    els.welcomeStarterLoad.disabled =
+      parsed.kind === "none" && !hasBoards;
     var label = els.welcomeStarterLoad.querySelector(".btn-label");
     var icon = els.welcomeStarterLoad.querySelector(
       ".material-symbols-outlined"
@@ -2205,11 +2943,12 @@
     return {
       id: id || "view-" + Date.now(),
       name: name,
-      workType: state.workType,
+      workType: state.hideCards ? "checkitem" : "both",
       status: state.hideCompleted ? "incomplete" : "all",
       due: els.filterDue.value,
       groupBy: state.groupBy,
       view: state.view,
+      calendarMode: state.calendarMode,
       sortKey: state.sortKey,
       sortDir: state.sortDir,
       collapsedGroups: Object.assign({}, state.collapsedGroups),
@@ -2219,6 +2958,7 @@
       lists: els.filterList ? getCheckedValues(els.filterList) : [],
       search: els.filterSearch.value || "",
       showReminders: state.showReminders,
+      hideCards: state.hideCards,
     };
   }
 
@@ -2256,10 +2996,20 @@
     state.workType = view.workType || "both";
     state.groupBy = view.groupBy || "due";
     state.view = view.view || "list";
+    if (state.view === "week") {
+      state.view = "calendar";
+      state.calendarMode = "week";
+    } else if (view.calendarMode === "week" || view.calendarMode === "month") {
+      state.calendarMode = view.calendarMode;
+    }
     state.sortKey = view.sortKey || "due";
     state.sortDir = view.sortDir === "desc" ? "desc" : "asc";
     state.showReminders = Boolean(view.showReminders);
     state.hideCompleted = view.status !== "all" && view.status !== "complete";
+    state.hideCards =
+      view.hideCards != null
+        ? Boolean(view.hideCards)
+        : view.workType === "checkitem";
     state.collapsedGroups = Object.assign({}, view.collapsedGroups || {});
     if (els.filterWorkType) els.filterWorkType.value = state.workType;
     if (els.filterReminders) {
@@ -2267,6 +3017,9 @@
     }
     if (els.filterHideCompleted) {
       els.filterHideCompleted.checked = state.hideCompleted;
+    }
+    if (els.filterHideCards) {
+      els.filterHideCards.checked = state.hideCards;
     }
     if (els.filterGroup) els.filterGroup.value = state.groupBy;
     els.filterDue.value = view.due || "all";
@@ -2305,6 +3058,8 @@
       collapsedGroups: state.collapsedGroups,
       showReminders: state.showReminders,
       hideCompleted: state.hideCompleted,
+      hideCards: state.hideCards,
+      calendarMode: state.calendarMode,
     });
     renderTable();
   }
@@ -2332,25 +3087,24 @@
   function updateFilterSummary() {
     if (!els.filterSummary) return;
     var bits = [];
-    var work =
-      state.workType === "card"
-        ? "Cards"
-        : state.workType === "checkitem"
-          ? "Tasks"
-          : "Tasks + cards";
-    bits.push(work);
+    bits.push(state.hideCards ? "Tasks" : "Tasks + cards");
 
     var assignees = getCheckedValues(els.filterAssignee);
     if (assignees.length === 1 && assignees[0] === "me") bits.push("Me");
     else if (assignees.length) bits.push(assignees.length + " assignees");
 
-    if (state.hideCompleted) bits.push("Open");
-    if (state.showReminders) bits.push("Reminders");
-    if (els.filterDue.value !== "all" && state.view !== "calendar") {
+    if (state.hideCompleted && viewUsesHideCompleted(state.view)) {
+      bits.push("Open");
+    }
+    if (state.showReminders && viewUsesReminders(state.view)) {
+      bits.push("Reminders");
+    }
+    if (els.filterDue.value !== "all" && !viewOwnsTime(state.view)) {
       var dueLabels = {
         myday: "My day",
         overdue: "Overdue",
         today: "Today",
+        tomorrow: "Tomorrow",
         week: "7 days",
         none: "Undated",
       };
@@ -2382,8 +3136,15 @@
 
   function setUiAuthorized(isAuthorized) {
     els.authBtn.hidden = isAuthorized;
+    if (els.disconnectBtn) {
+      els.disconnectBtn.hidden = !isAuthorized || state.demo;
+    }
+    if (els.disconnectSep) {
+      els.disconnectSep.hidden = !isAuthorized || state.demo;
+    }
     if (els.workspace) els.workspace.hidden = !isAuthorized;
     if (els.configToggle) els.configToggle.hidden = !isAuthorized;
+    if (els.themeToggle) els.themeToggle.hidden = !isAuthorized;
     if (els.metaRow) els.metaRow.hidden = !isAuthorized;
     if (els.viewToggle) els.viewToggle.hidden = !isAuthorized;
     if (els.stageBar) els.stageBar.hidden = !isAuthorized;
@@ -2392,10 +3153,13 @@
     }
     if (!isAuthorized) {
       if (els.calendarWrap) els.calendarWrap.hidden = true;
+      if (els.insightWrap) els.insightWrap.hidden = true;
+      if (els.insightWrap) els.insightWrap.hidden = true;
       if (els.refreshBtn) els.refreshBtn.hidden = true;
       if (els.syncActions) els.syncActions.hidden = true;
       stopStatusNudgeWatch();
       closeSyncMenu();
+      closeViewMenu();
     } else {
       populateSavedViews();
       setConfigOpen(state.filtersOpen);
@@ -2453,6 +3217,9 @@
       els.exportBtn.hidden = !ready || !hasData;
       els.exportBtn.disabled = !ready || !hasData;
     }
+    if (els.copyListBtn) {
+      els.copyListBtn.hidden = !ready || !hasData;
+    }
 
     if (!hasData) closeSyncMenu();
   }
@@ -2487,11 +3254,16 @@
     beginScan();
   }
 
-  function beginScan() {
+  function beginScan(retried) {
     closeScanConfirm();
     closeLoadBlockedModal();
     closeWelcomeModal({ persist: true, skipSession: true });
     closeSyncMenu();
+    if (!retried && boardListInFlight && !state.boardsReady) {
+      return boardListInFlight.then(function () {
+        return beginScan(true);
+      });
+    }
     var blocker = getLoadChecklistsBlocker();
     if (blocker) {
       warnLoadBlocked(blocker);
@@ -2555,9 +3327,12 @@
     }
   }
 
+  var boardListInFlight = null;
+
   function loadBoardList(options) {
-    var listOpts = options || {};
+    if (boardListInFlight) return boardListInFlight;
     if (state.loading) return Promise.resolve();
+    var listOpts = options || {};
     state.loading = true;
     syncActionButtons();
 
@@ -2577,16 +3352,28 @@
     }
     state.scanAbort =
       typeof AbortController !== "undefined" ? new AbortController() : null;
+    var listAbort = state.scanAbort;
 
+    var work;
     if (state.demo) {
       setScanProgress(0, 1, "Board names", "catalog");
-      return demoDelay(200)
+      // Demo catalog uses a standalone timer so abort races with Load cannot hang UI.
+      work = new Promise(function (resolve) {
+        setTimeout(resolve, 120);
+      })
         .then(function () {
+          if (listAbort && listAbort.signal && listAbort.signal.aborted) {
+            var err = new Error("Cancelled.");
+            err.name = "AbortError";
+            throw err;
+          }
           var mock = null;
           if (window.ChecklistHubMock) {
             if (typeof window.ChecklistHubMock.getDataset === "function") {
               mock = window.ChecklistHubMock.getDataset();
-            } else if (typeof window.ChecklistHubMock.buildDataset === "function") {
+            } else if (
+              typeof window.ChecklistHubMock.buildDataset === "function"
+            ) {
               mock = window.ChecklistHubMock.buildDataset();
             }
           }
@@ -2610,46 +3397,52 @@
             return;
           }
           showErrorBanner(err, "Board list");
+        });
+    } else {
+      work = ensureAuthorized()
+        .then(function (token) {
+          if (!token) return null;
+          state.token = token;
+          if (!isApiKeyConfigured()) {
+            throw new Error(
+              "Set your Power-Up API key in public/config.js before using Checklist Hub. Or open dashboard.html?demo=1 for a local preview."
+            );
+          }
+          els.subtitle.textContent = "Listing boards…";
+          setScanProgress(0, 1, "Board names", "catalog");
+          return api.loadBoardCatalog(state.token, {
+            signal: state.scanAbort ? state.scanAbort.signal : null,
+          });
         })
-        .finally(finish);
+        .then(function (catalog) {
+          if (!catalog) return;
+          applyBoardCatalog(catalog, listOpts);
+          setScanProgress(1, 1, "Done", "catalog");
+          if (listOpts.refreshOnly && state.data) {
+            showBanner(
+              "Board name list refreshed. Checklist data is unchanged until you Load boards.",
+              "info",
+              { dismissible: true, bannerKind: "board-pick" }
+            );
+          }
+        })
+        .catch(function (err) {
+          if (err && err.name === "AbortError") {
+            showBanner("Cancelled.", "info", { dismissible: true });
+            return;
+          }
+          showErrorBanner(err, "Board list");
+          els.subtitle.textContent = "Could not list board names";
+        });
     }
 
-    return ensureAuthorized()
-      .then(function (token) {
-        if (!token) return null;
-        state.token = token;
-        if (!isApiKeyConfigured()) {
-          throw new Error(
-            "Set your Power-Up API key in public/config.js before using Checklist Hub. Or open dashboard.html?demo=1 for a local preview."
-          );
-        }
-        els.subtitle.textContent = "Listing boards…";
-        setScanProgress(0, 1, "Board names", "catalog");
-        return api.loadBoardCatalog(state.token, {
-          signal: state.scanAbort ? state.scanAbort.signal : null,
-        });
-      })
-      .then(function (catalog) {
-        if (!catalog) return;
-        applyBoardCatalog(catalog, listOpts);
-        setScanProgress(1, 1, "Done", "catalog");
-        if (listOpts.refreshOnly && state.data) {
-          showBanner(
-            "Board name list refreshed. Checklist data is unchanged until you Load boards.",
-            "info",
-            { dismissible: true, bannerKind: "board-pick" }
-          );
-        }
-      })
-      .catch(function (err) {
-        if (err && err.name === "AbortError") {
-          showBanner("Cancelled.", "info", { dismissible: true });
-          return;
-        }
-        showErrorBanner(err, "Board list");
-        els.subtitle.textContent = "Could not list board names";
-      })
-      .finally(finish);
+    boardListInFlight = work.finally(function () {
+      boardListInFlight = null;
+      if (state.scanAbort === listAbort) {
+        finish();
+      }
+    });
+    return boardListInFlight;
   }
 
   function boardsMissingFromScan() {
@@ -2683,20 +3476,15 @@
     if (state.allowlistRescanNeeded) {
       var missingCount = missing.length;
       showBanner(
-        "You ticked " +
-          missingCount +
-          " board" +
-          (missingCount === 1 ? "" : "s") +
-          " that " +
-          (missingCount === 1 ? "is" : "are") +
-          " not in this list yet. Load boards to pull " +
-          (missingCount === 1 ? "its" : "their") +
-          " items (board names stay as they are).",
+        missingCount +
+          (missingCount === 1 ? " ticked board is" : " ticked boards are") +
+          " not loaded yet.",
         "info",
         {
           dismissible: true,
           bannerKind: "allowlist-rescan",
-          actionLabel: "Load boards",
+          actionLabel:
+            missingCount === 1 ? "Load that board" : "Load those boards",
           action: function () {
             runScan({ skipConfirm: true, forceFull: true });
           },
@@ -2713,10 +3501,6 @@
   }
 
   function cancelScan() {
-    if (state.demoTimer) {
-      clearTimeout(state.demoTimer);
-      state.demoTimer = null;
-    }
     if (state.scanAbort) {
       try {
         state.scanAbort.abort();
@@ -2724,26 +3508,41 @@
         // ignore
       }
     }
+    if (state.demoTimer) {
+      clearTimeout(state.demoTimer);
+      state.demoTimer = null;
+    }
   }
 
   function demoDelay(ms) {
     return new Promise(function (resolve, reject) {
-      if (state.scanAbort && state.scanAbort.signal.aborted) {
+      var signal = state.scanAbort && state.scanAbort.signal;
+      if (signal && signal.aborted) {
         var early = new Error("Cancelled.");
         early.name = "AbortError";
         reject(early);
         return;
       }
-      state.demoTimer = setTimeout(function () {
-        state.demoTimer = null;
-        if (state.scanAbort && state.scanAbort.signal.aborted) {
-          var err = new Error("Cancelled.");
-          err.name = "AbortError";
-          reject(err);
-          return;
-        }
-        resolve();
+      var settled = false;
+      var timer = null;
+      function settle(fn, arg) {
+        if (settled) return;
+        settled = true;
+        if (signal) signal.removeEventListener("abort", onAbort);
+        if (state.demoTimer === timer) state.demoTimer = null;
+        fn(arg);
+      }
+      function onAbort() {
+        if (timer) clearTimeout(timer);
+        var err = new Error("Cancelled.");
+        err.name = "AbortError";
+        settle(reject, err);
+      }
+      timer = setTimeout(function () {
+        settle(resolve);
       }, ms);
+      state.demoTimer = timer;
+      if (signal) signal.addEventListener("abort", onAbort);
     });
   }
 
@@ -2786,29 +3585,39 @@
     return days === 1 ? "1 day ago" : days + " days ago";
   }
 
+  function setScanNudge(label, title) {
+    if (!els.scanNudge) return;
+    els.scanNudge.hidden = false;
+    els.scanNudge.title = title;
+    var text = els.scanNudge.querySelector(".scan-nudge-label");
+    if (text) text.textContent = label;
+  }
+
   function updateScanNudge() {
     if (!els.scanNudge) return;
     if (state.allowlistRescanNeeded && state.data) {
-      els.scanNudge.hidden = false;
-      els.scanNudge.title =
-        "Load checklist items from boards you newly selected under Boards";
-      els.scanNudge.innerHTML =
-        '<span class="material-symbols-outlined" aria-hidden="true">radar</span> Load boards for new boards?';
+      var missing = boardsMissingFromScan().length;
+      var label =
+        missing === 1 ? "Load added board" : "Load " + missing + " added boards";
+      setScanNudge(
+        label,
+        "These boards are ticked, but their checklist items are not in the list yet."
+      );
       return;
     }
     if (!state.data || !state.data.fetchedAt || state.loading) {
       els.scanNudge.hidden = true;
       return;
     }
-    var ttl = config.cacheTtlMs || 5 * 60 * 1000;
+    var ttl = (config && config.cacheTtlMs) || 5 * 60 * 1000;
     var nudgeAfter = Math.max(ttl, 15 * 60 * 1000);
     var age = Date.now() - state.data.fetchedAt;
     els.scanNudge.hidden = age < nudgeAfter;
     if (!els.scanNudge.hidden) {
-      els.scanNudge.title =
-        "Load boards again for selected boards (find newly assigned work)";
-      els.scanNudge.innerHTML =
-        '<span class="material-symbols-outlined" aria-hidden="true">radar</span> Load boards for new assignments?';
+      setScanNudge(
+        "Check for new tasks",
+        "Look again for work assigned since the last load. Update status only refreshes items already here."
+      );
     }
   }
 
@@ -2818,20 +3627,46 @@
     var steps = els.emptyState.querySelector(".empty-steps");
     var note = els.emptyState.querySelector(".empty-note");
     if (mode === "pick-boards") {
-      if (heading) heading.textContent = "Choose boards to load";
+      var ticked = getAllowlistBoardIds().length;
+      if (heading) {
+        heading.textContent = ticked ? "Load these boards" : "Choose boards to load";
+      }
       if (steps) steps.hidden = true;
       if (note) {
         note.hidden = false;
-        note.textContent =
-          "Tick boards under Filters → Boards, then Load boards. Closing the hub clears checklist data.";
+        note.textContent = ticked
+          ? ticked +
+            " board" +
+            (ticked === 1 ? " is" : "s are") +
+            " ticked. Press Load boards to pull checklist items. Closing the hub clears that data."
+          : "Tick boards under Filters → Boards, then Load boards. Closing the hub clears checklist data.";
       }
     } else if (mode === "idle") {
       if (heading) heading.textContent = "Ready when you are";
-      if (steps) steps.hidden = false;
+      if (steps) {
+        steps.hidden = false;
+        var items = steps.querySelectorAll("li");
+        if (items.length >= 3) {
+          if (state.demo) {
+            items[0].textContent = "Demo mode — no Trello authorize needed.";
+            items[1].textContent =
+              "Boards list automatically. Tick the ones you need (a team preselects them).";
+            items[2].textContent =
+              "Load boards — then explore filters and views with sample data.";
+          } else {
+            items[0].textContent = "Authorize once (read-only).";
+            items[1].textContent =
+              "Boards list automatically. Tick the ones you need (a team preselects them).";
+            items[2].textContent =
+              "Load boards — then open cards in Trello to finish work.";
+          }
+        }
+      }
       if (note) {
         note.hidden = false;
-        note.textContent =
-          "Boards are listed when you open the hub. Tick the ones you need, then Load boards. Day to day, prefer Update status.";
+        note.textContent = state.demo
+          ? "Pick a Quick start team or tick boards, then Load boards. Sample data only."
+          : "Boards are listed when you open the hub. Tick the ones you need, then Load boards. Day to day, prefer Update status.";
       }
     } else {
       if (heading) heading.textContent = "No matching work";
@@ -2856,6 +3691,7 @@
     if (els.exportBtn) els.exportBtn.hidden = true;
     hideScanProgress();
     if (els.tableWrap) els.tableWrap.hidden = true;
+    if (els.tableWrap) els.tableWrap.classList.remove("is-shown");
     if (els.calendarWrap) els.calendarWrap.hidden = true;
     setEmptyCopy(state.boardsReady ? "pick-boards" : "idle");
     if (els.emptyState) els.emptyState.hidden = false;
@@ -2864,13 +3700,15 @@
         var key = chip.getAttribute("data-due-chip");
         var active = (els.filterDue && els.filterDue.value) === key;
         chip.classList.toggle("is-active", active);
+        chip.classList.toggle("chip-emphasis", active);
         chip.setAttribute("aria-pressed", active ? "true" : "false");
         if (key === "all") chip.textContent = "All dates";
         else if (key === "myday") chip.textContent = "My day";
         else if (key === "none") chip.textContent = "Undated queue";
         else if (key === "overdue") chip.textContent = "Overdue";
         else if (key === "today") chip.textContent = "Today";
-        else chip.textContent = "Next 7 days";
+        else if (key === "tomorrow") chip.textContent = "Tomorrow";
+        else if (key === "week") chip.textContent = "Next 7 days";
       });
     }
     syncActionButtons();
@@ -2897,6 +3735,9 @@
     }
     if (els.loadBlockedModal && !els.loadBlockedModal.hidden) {
       return els.loadBlockedModal;
+    }
+    if (els.ganttChecklistModal && !els.ganttChecklistModal.hidden) {
+      return els.ganttChecklistModal;
     }
     if (els.privacyModal && !els.privacyModal.hidden) return els.privacyModal;
     if (els.apiUsageModal && !els.apiUsageModal.hidden) return els.apiUsageModal;
@@ -2956,12 +3797,18 @@
     if (!force) {
       if (state.data) return;
       if (state.welcomeSkippedThisSession) return;
-      if (prefsApi.loadPrefs().welcomeDismissed) return;
+      if (
+        params.get("welcome") !== "1" &&
+        prefsApi.loadPrefs().welcomeDismissed
+      ) {
+        return;
+      }
     }
     closeScanConfirm();
     closeLoadBlockedModal();
     closePrivacyModal();
     closeApiUsageModal();
+    closeGanttChecklistModal();
     syncWelcomeTeamsUi();
     populateWelcomeStarter();
     var focusEl =
@@ -2996,6 +3843,7 @@
     closePrivacyModal();
     closeApiUsageModal();
     closeLoadBlockedModal();
+    closeGanttChecklistModal();
     openModalShell(els.scanConfirmModal, els.scanConfirmOk);
   }
 
@@ -3020,6 +3868,7 @@
     closeScanConfirm();
     closePrivacyModal();
     closeApiUsageModal();
+    closeGanttChecklistModal();
     if (els.loadBlockedTitle) {
       els.loadBlockedTitle.textContent = blocker.title || "Can't load boards";
     }
@@ -3046,6 +3895,7 @@
     closeScanConfirm();
     closeLoadBlockedModal();
     closeApiUsageModal();
+    closeGanttChecklistModal();
     openModalShell(
       els.privacyModal,
       els.privacyModalClose ||
@@ -3070,9 +3920,10 @@
   }
 
   function statusNudgeMs() {
+    if (!config) return 0;
     var ms =
       config.statusNudgeMs != null ? config.statusNudgeMs : config.statusPollMs;
-    return ms;
+    return ms || 0;
   }
 
   function lastStatusFreshAt() {
@@ -3131,11 +3982,54 @@
   }
 
   function getRestApiClient() {
+    if (!t || typeof t.getRestApi !== "function") {
+      return Promise.reject(new Error("Trello Power-Up client is not available."));
+    }
     // Trello docs say Promise, but the client returns the RestApi object
     // (with .authorize / .isAuthorized / .getToken) in current power-up.min.js.
     var api = t.getRestApi();
     if (api && typeof api.then === "function") return api;
     return Promise.resolve(api);
+  }
+
+  function disconnectHub() {
+    if (state.demo) {
+      showBanner("Demo mode has no Trello token to disconnect.", "info", {
+        dismissible: true,
+      });
+      return;
+    }
+    getRestApiClient()
+      .then(function (rest) {
+        if (rest && typeof rest.clearToken === "function") {
+          return rest.clearToken();
+        }
+        return null;
+      })
+      .then(function () {
+        state.token = null;
+        state.data = null;
+        state.boardsReady = false;
+        state.boardCatalog = null;
+        if (api && api.clearCache) api.clearCache();
+        setUiAuthorized(false);
+        els.subtitle.textContent = "Disconnected · authorize to continue";
+        if (els.tableWrap) {
+          els.tableWrap.hidden = true;
+          els.tableWrap.classList.remove("is-shown");
+        }
+        if (els.calendarWrap) els.calendarWrap.hidden = true;
+        if (els.insightWrap) els.insightWrap.hidden = true;
+        if (els.emptyState) els.emptyState.hidden = true;
+        showBanner(
+          "Disconnected from Trello. Authorize again when you want to use Checklist Hub.",
+          "info",
+          { dismissible: true }
+        );
+      })
+      .catch(function (err) {
+        showErrorBanner(err, "Disconnect");
+      });
   }
 
   function ensureAuthorized() {
@@ -3145,7 +4039,9 @@
           setUiAuthorized(false);
           els.subtitle.textContent = "Authorize to load checklist items.";
           els.tableWrap.hidden = true;
+          els.tableWrap.classList.remove("is-shown");
           if (els.calendarWrap) els.calendarWrap.hidden = true;
+      if (els.insightWrap) els.insightWrap.hidden = true;
           els.emptyState.hidden = true;
           showBanner(
             "Authorize once with Trello (read-only). Boards list next — tick what you need, then Load boards.",
@@ -3237,9 +4133,17 @@
           (data.me.fullName || data.me.username || "member");
     }
     state.statusNudgeDismissedUntil = 0;
-    startStatusNudgeWatch();
+    try {
+      startStatusNudgeWatch();
+    } catch (err) {
+      // Nudge is optional; a config miss must not hide loaded items.
+    }
     syncActionButtons();
-    updateScanNudge();
+    try {
+      updateScanNudge();
+    } catch (err) {
+      // Scan nudge is optional.
+    }
     if (applyPendingOrDefaultView()) return;
     renderTable();
   }
@@ -3375,7 +4279,8 @@
             " · changed " +
             (meta.updated || 0) +
             (meta.added ? " · +" + meta.added : "") +
-            (meta.removed ? " · âˆ’" + meta.removed : "");
+            (meta.removed ? " · −" + meta.removed : "") +
+            (meta.skipped ? " · skipped " + meta.skipped : "");
         }
 
         applyDataset(result.data, {
@@ -3423,8 +4328,18 @@
       "info"
     );
     return new Promise(function (resolve, reject) {
-      demoDelay(forceRefresh ? 250 : 80)
-        .then(function () {
+      setTimeout(function () {
+        try {
+          if (
+            state.scanAbort &&
+            state.scanAbort.signal &&
+            state.scanAbort.signal.aborted
+          ) {
+            var err = new Error("Cancelled.");
+            err.name = "AbortError";
+            reject(err);
+            return;
+          }
           var dataset = window.ChecklistHubMock.buildDataset();
           var selected = getAllowlistBoardIds();
           var selectedSet = {};
@@ -3453,8 +4368,10 @@
           state.boardsReady = true;
           state.allowlistRescanNeeded = false;
           resolve();
-        })
-        .catch(reject);
+        } catch (e) {
+          reject(e);
+        }
+      }, forceRefresh ? 180 : 60);
     });
   }
 
@@ -3478,7 +4395,14 @@
       clearNonPrivacyBanner();
     }
 
+    var loadAbort = state.scanAbort;
+    if (!loadAbort && typeof AbortController !== "undefined") {
+      loadAbort = new AbortController();
+      state.scanAbort = loadAbort;
+    }
+
     var finish = function () {
+      if (state.scanAbort !== loadAbort) return;
       state.loading = false;
       state.scanAbort = null;
       hideScanProgress();
@@ -3522,6 +4446,12 @@
         return api.getChecklistData(state.token, {
           forceRefresh: true,
           boardIds: getAllowlistBoardIds(),
+          me:
+            (state.boardCatalog && state.boardCatalog.me) ||
+            state.catalogMe ||
+            null,
+          allBoards:
+            (state.boardCatalog && state.boardCatalog.boards) || null,
           signal: state.scanAbort ? state.scanAbort.signal : null,
           onProgress: function (done, total, boardName) {
             els.subtitle.textContent =
@@ -3583,6 +4513,7 @@
       (!els.welcomeModal || els.welcomeModal.hidden) &&
       (!els.scanConfirmModal || els.scanConfirmModal.hidden) &&
       (!els.loadBlockedModal || els.loadBlockedModal.hidden) &&
+      (!els.ganttChecklistModal || els.ganttChecklistModal.hidden) &&
       (!els.privacyModal || els.privacyModal.hidden) &&
       (!els.apiUsageModal || els.apiUsageModal.hidden)
     );
@@ -3622,17 +4553,29 @@
   function syncWelcomeTeamsUi() {
     var hasTeams = state.teams && state.teams.length > 0;
     var hasViews = prefsApi.loadViews().length > 0;
+    var showStarter = hasTeams || hasViews;
     populateWelcomeStarter();
+    if (els.welcomeStarterBlock) {
+      els.welcomeStarterBlock.hidden = !showStarter;
+    }
     if (els.welcomeLead) {
-      if (!state.boardsReady) {
-        if (hasTeams || hasViews) {
+      if (state.demo && !state.boardsReady) {
+        els.welcomeLead.textContent = showStarter
+          ? "Listing boards… Use Quick start for a team, or tick boards yourself."
+          : "Listing sample boards… then tick Boards and Load boards.";
+      } else if (state.demo) {
+        els.welcomeLead.textContent = showStarter
+          ? "Use Quick start, or tick Boards yourself, then Load boards. Sample data only."
+          : "Tick boards under Filters → Boards, then Load boards. Sample data only.";
+      } else if (!state.boardsReady) {
+        if (showStarter) {
           els.welcomeLead.textContent =
             "Listing boards… Use Quick start for a team or saved view, or tick boards yourself.";
         } else {
           els.welcomeLead.textContent =
             "Listing available boards… then tick Boards and Load boards.";
         }
-      } else if (hasTeams || hasViews) {
+      } else if (showStarter) {
         els.welcomeLead.textContent =
           "Use Quick start, or tick Boards yourself, then Load boards.";
       } else {
@@ -3641,6 +4584,8 @@
       }
     }
     if (els.welcomeScan) {
+      // Avoid two Load buttons when Quick start already has a primary action.
+      els.welcomeScan.hidden = showStarter;
       var scanLabel = els.welcomeScan.querySelector(".btn-label");
       var scanIcon = els.welcomeScan.querySelector(".material-symbols-outlined");
       if (scanLabel) scanLabel.textContent = "Load boards";
@@ -3648,10 +4593,6 @@
       els.welcomeScan.title =
         "Load items from the boards ticked under Filters → Boards";
     }
-    updateWelcomeStarterLoadButton();
-  }
-
-  function updateWelcomeScanTeamButton() {
     updateWelcomeStarterLoadButton();
   }
 
@@ -3811,22 +4752,25 @@
           ? ""
           : "No Checklist Hub Team checklists on this board.";
       })
-      .catch(function () {
+      .catch(function (err) {
         state.teams = [];
         populateTeamsSelect([]);
         state.teamsContextNote = "Could not load teams from this board.";
+        if (err && err.name !== "AbortError") {
+          showErrorBanner(err, "Load teams");
+        }
       });
   }
 
   function preprocessApiUsageLog() {
-    var root = els.apiUsageLog || document.getElementById("api-usage-log");
-    var rows = root ? root.children : [];
+    var events =
+      (api.getApiUsageEvents && api.getApiUsageEvents()) || [];
     var totalUnits = 0;
-    var totalCalls = rows.length;
+    var totalCalls = events.length;
     var buckets = {};
-    Array.prototype.forEach.call(rows, function (row) {
-      var at = Number(row.getAttribute("data-at")) || 0;
-      var units = Number(row.getAttribute("data-units")) || 1;
+    events.forEach(function (row) {
+      var at = Number(row.at) || 0;
+      var units = Number(row.units) || 1;
       totalUnits += units;
       var bucket = Math.floor(at / 10000) * 10000;
       if (!buckets[bucket]) buckets[bucket] = { at: bucket, units: 0, calls: 0 };
@@ -3849,7 +4793,9 @@
       totalCalls: totalCalls,
       peak: peak,
       buckets: list,
-      limit: 300,
+      keyLimit: 300,
+      tokenLimit: 100,
+      limit: 100,
     };
   }
 
@@ -3868,8 +4814,10 @@
         " · peak <strong>" +
         stats.peak +
         "</strong> / " +
-        stats.limit +
-        " in a 10s window</p>";
+        stats.tokenLimit +
+        " token (and " +
+        stats.keyLimit +
+        " API key) per 10s</p>";
     }
     if (els.apiUsageBuckets) {
       if (!stats.buckets.length) {
@@ -3880,9 +4828,9 @@
           '<table class="api-usage-table"><thead><tr><th>10s window</th><th>Units</th><th>Calls</th></tr></thead><tbody>';
         stats.buckets.forEach(function (bucket) {
           var warn =
-            bucket.units >= stats.limit
+            bucket.units >= stats.tokenLimit
               ? " is-over"
-              : bucket.units >= stats.limit * 0.8
+              : bucket.units >= stats.tokenLimit * 0.8
                 ? " is-warn"
                 : "";
           var start = new Date(bucket.at);
@@ -3912,6 +4860,7 @@
     closeScanConfirm();
     closeLoadBlockedModal();
     closePrivacyModal();
+    closeGanttChecklistModal();
     renderApiUsageModal();
     openModalShell(
       els.apiUsageModal,
@@ -3928,7 +4877,224 @@
     }
   }
 
+  function resolveGanttChecklistItems(checklist) {
+    var fallback = (checklist && checklist.items) || [];
+    if (!checklist || !state.data) return fallback.slice();
+    var cardId =
+      checklist.sample && checklist.sample.cardId
+        ? checklist.sample.cardId
+        : null;
+    var checklistId = checklist.id || null;
+    var checklistName = checklist.name || "";
+    var found = [];
+    (state.data.items || []).forEach(function (item) {
+      if (!item || item.kind !== "checkitem") return;
+      if (isReminderRow(item)) return;
+      if (checklistId && item.checklistId === checklistId) {
+        found.push(item);
+        return;
+      }
+      if (
+        !checklistId &&
+        cardId &&
+        item.cardId === cardId &&
+        (item.checklistName || "") === checklistName
+      ) {
+        found.push(item);
+      }
+    });
+    return found.length ? found : fallback.slice();
+  }
+
+  function openGanttChecklistModal(checklist) {
+    if (!els.ganttChecklistModal || !checklist) return;
+    closeWelcomeModal();
+    closeScanConfirm();
+    closeLoadBlockedModal();
+    closePrivacyModal();
+    closeApiUsageModal();
+
+    var items = resolveGanttChecklistItems(checklist);
+    items.sort(function (a, b) {
+      var aDue = a.due ? new Date(a.due).getTime() : Infinity;
+      var bDue = b.due ? new Date(b.due).getTime() : Infinity;
+      if (aDue !== bDue) return aDue - bDue;
+      return String(a.name || "").localeCompare(String(b.name || ""));
+    });
+
+    var dated = 0;
+    var undated = 0;
+    var complete = 0;
+    items.forEach(function (item) {
+      if (item.due) dated += 1;
+      else undated += 1;
+      if (itemState(item) === "complete") complete += 1;
+    });
+
+    if (els.ganttChecklistModalTitle) {
+      els.ganttChecklistModalTitle.textContent =
+        checklist.name || "Checklist";
+    }
+    if (els.ganttChecklistModalMeta) {
+      els.ganttChecklistModalMeta.textContent = [
+        checklist.boardName,
+        checklist.cardName,
+        checklist.listName,
+        items.length +
+          " item" +
+          (items.length === 1 ? "" : "s") +
+          (dated ? " · " + dated + " dated" : "") +
+          (undated ? " · " + undated + " undated" : "") +
+          (complete ? " · " + complete + " complete" : ""),
+      ]
+        .filter(Boolean)
+        .join(" · ");
+    }
+    if (els.ganttChecklistModalNote) {
+      if (undated && dated) {
+        els.ganttChecklistModalNote.hidden = false;
+        els.ganttChecklistModalNote.textContent =
+          "The Gantt bar spans dated items only. Undated items are listed here.";
+      } else if (undated && !dated) {
+        els.ganttChecklistModalNote.hidden = false;
+        els.ganttChecklistModalNote.textContent =
+          "No due dates on this checklist — nothing to plot on the timeline.";
+      } else {
+        els.ganttChecklistModalNote.hidden = true;
+        els.ganttChecklistModalNote.textContent = "";
+      }
+    }
+
+    if (els.ganttChecklistOpenCard) {
+      var url =
+        checklist.cardUrl ||
+        (checklist.sample && checklist.sample.cardUrl) ||
+        "";
+      if (url && applySafeHref(els.ganttChecklistOpenCard, url)) {
+        els.ganttChecklistOpenCard.hidden = false;
+        els.ganttChecklistOpenCard.setAttribute(
+          "aria-label",
+          "Open card " +
+            (checklist.cardName || "") +
+            " in Trello"
+        );
+      } else {
+        els.ganttChecklistOpenCard.hidden = true;
+        els.ganttChecklistOpenCard.removeAttribute("href");
+      }
+    }
+
+    if (els.ganttChecklistModalList) {
+      els.ganttChecklistModalList.innerHTML = "";
+      if (!items.length) {
+        var empty = document.createElement("li");
+        empty.className = "gantt-checklist-modal-empty";
+        empty.textContent = "No checklist items found.";
+        els.ganttChecklistModalList.appendChild(empty);
+      } else {
+        items.forEach(function (item) {
+          var rowState = itemState(item);
+          var li = document.createElement("li");
+          li.className =
+            "gantt-checklist-modal-item" +
+            (rowState === "complete" ? " is-complete" : "") +
+            (item.due ? "" : " is-undated");
+
+          var main = document.createElement("div");
+          main.className = "gantt-checklist-modal-main";
+          var name = document.createElement("span");
+          name.className = "gantt-checklist-modal-name";
+          name.textContent = item.name || "Untitled item";
+          main.appendChild(name);
+
+          var actions = document.createElement("div");
+          actions.className = "gantt-checklist-modal-row-actions";
+
+          var status = document.createElement("span");
+          status.className =
+            "gantt-checklist-modal-status" +
+            (rowState === "complete" ? " is-complete" : "");
+          status.textContent =
+            rowState === "complete" ? "Complete" : "Incomplete";
+          actions.appendChild(status);
+
+          var itemUrl =
+            item.cardUrl ||
+            checklist.cardUrl ||
+            (checklist.sample && checklist.sample.cardUrl) ||
+            "";
+          var openLink = document.createElement("a");
+          openLink.className = "link-open gantt-checklist-modal-open";
+          openLink.target = "_blank";
+          openLink.rel = "noopener noreferrer";
+          openLink.textContent = "Open";
+          openLink.setAttribute(
+            "aria-label",
+            "Open card " +
+              (item.cardName || checklist.cardName || item.name || "") +
+              " in Trello"
+          );
+          if (applySafeHref(openLink, itemUrl)) {
+            actions.appendChild(openLink);
+          }
+          main.appendChild(actions);
+          li.appendChild(main);
+
+          var meta = document.createElement("div");
+          meta.className = "gantt-checklist-modal-item-meta";
+          var dueSpan = document.createElement("span");
+          dueSpan.className =
+            "gantt-checklist-modal-due " +
+            dueClass(item.due, rowState, item);
+          dueSpan.textContent = formatDueRelative(
+            item.due,
+            rowState,
+            item
+          );
+          dueSpan.title = item.due ? formatDue(item.due) : "No due date";
+          meta.appendChild(dueSpan);
+          if (item.assigneeName) {
+            var who = document.createElement("span");
+            who.textContent = item.assigneeName;
+            meta.appendChild(who);
+          }
+          li.appendChild(meta);
+          els.ganttChecklistModalList.appendChild(li);
+        });
+      }
+    }
+
+    openModalShell(
+      els.ganttChecklistModal,
+      (els.ganttChecklistOpenCard && !els.ganttChecklistOpenCard.hidden
+        ? els.ganttChecklistOpenCard
+        : null) ||
+        els.ganttChecklistModalClose ||
+        els.ganttChecklistModal.querySelector(".welcome-dialog button")
+    );
+  }
+
+  function closeGanttChecklistModal() {
+    if (els.ganttChecklistModal) els.ganttChecklistModal.hidden = true;
+    if (noOtherModalOpen()) {
+      document.body.classList.remove("welcome-open");
+      restoreModalFocus();
+    }
+  }
+
   function bootstrapHub() {
+    if (powerUpMissing) {
+      if (els.subtitle) {
+        els.subtitle.textContent = "Power-Up client failed to load";
+      }
+      if (els.authBtn) els.authBtn.hidden = true;
+      showBanner(
+        "Checklist Hub could not load Trello’s Power-Up client. Check your network or Content-Security-Policy, then reopen from the board. Demo mode is disabled inside Trello.",
+        "error",
+        { dismissible: false }
+      );
+      return Promise.resolve();
+    }
     state.applyDefaultViewPending = true;
     if (state.demo) {
       setUiAuthorized(true);
@@ -4021,7 +5187,7 @@
     }
     getRestApiClient()
       .then(function (rest) {
-        return rest.authorize({ scope: "read", expiration: "never" });
+        return rest.authorize({ scope: "read", expiration: oauthExpiration() });
       })
       .then(function () {
         return ensureAuthorized();
@@ -4050,6 +5216,12 @@
       });
   });
 
+  if (els.disconnectBtn) {
+    els.disconnectBtn.addEventListener("click", function () {
+      disconnectHub();
+    });
+  }
+
   if (els.filterDue) {
     els.filterDue.addEventListener("change", function () {
       renderTable();
@@ -4060,6 +5232,14 @@
     els.filterHideCompleted.addEventListener("change", function () {
       state.hideCompleted = Boolean(els.filterHideCompleted.checked);
       savePrefs({ hideCompleted: state.hideCompleted });
+      renderTable();
+    });
+  }
+
+  if (els.filterHideCards) {
+    els.filterHideCards.addEventListener("change", function () {
+      state.hideCards = Boolean(els.filterHideCards.checked);
+      savePrefs({ hideCards: state.hideCards });
       renderTable();
     });
   }
@@ -4100,6 +5280,8 @@
       var chip = event.target.closest("[data-due-chip]");
       if (!chip) return;
       var key = chip.getAttribute("data-due-chip");
+      if (!key) return;
+      state.dueTouched = true;
       els.filterDue.value = key;
       renderTable();
     });
@@ -4236,6 +5418,10 @@
       if (parsed.kind === "team") {
         closeWelcomeModal({ skipSession: true });
         applySelectedTeam(parsed.id).then(function () {
+          var team = findTeamById(parsed.id);
+          if (team && team.boardIds && team.boardIds.length) {
+            applyAllowlistBoardIds(team.boardIds);
+          }
           if (teamBlocksScan() && !getAllowlistBoardIds().length) {
             warnLoadBlocked({
               title: "No boards for this team",
@@ -4247,9 +5433,12 @@
             return;
           }
           var goTeam = function () {
+            if (team && team.boardIds && team.boardIds.length) {
+              applyAllowlistBoardIds(team.boardIds);
+            }
             runScan({ skipConfirm: true, forceFull: true });
           };
-          if (!state.boardsReady) {
+          if (!state.boardsReady || boardListInFlight) {
             return loadBoardList({ silent: true }).then(goTeam);
           }
           goTeam();
@@ -4391,6 +5580,23 @@
     });
   }
 
+  if (els.ganttChecklistModalClose) {
+    els.ganttChecklistModalClose.addEventListener("click", function () {
+      closeGanttChecklistModal();
+    });
+  }
+
+  if (els.ganttChecklistModal) {
+    els.ganttChecklistModal.addEventListener("click", function (event) {
+      if (
+        event.target &&
+        event.target.hasAttribute("data-gantt-checklist-close")
+      ) {
+        closeGanttChecklistModal();
+      }
+    });
+  }
+
   if (els.filterTeam) {
     els.filterTeam.addEventListener("change", function () {
       var teamId = els.filterTeam.value || "";
@@ -4462,13 +5668,46 @@
     });
   }
 
-  if (els.viewToggle) {
-    els.viewToggle.addEventListener("click", function (event) {
-      var btn = event.target.closest("[data-view]");
+  if (els.themeToggle) {
+    els.themeToggle.addEventListener("click", function () {
+      applyTheme(state.theme === "dark" ? "light" : "dark");
+      savePrefs({ theme: state.theme });
+    });
+  }
+
+  if (els.themeToggleGroup) {
+    els.themeToggleGroup.addEventListener("click", function (event) {
+      var btn = event.target.closest("[data-theme]");
       if (!btn) return;
-      state.view = btn.getAttribute("data-view");
-      savePrefs({ view: state.view });
-      renderTable();
+      applyTheme(btn.getAttribute("data-theme"));
+      savePrefs({ theme: state.theme });
+    });
+  }
+
+  if (els.viewMenuBtn && els.viewMenu) {
+    els.viewMenuBtn.addEventListener("click", function (event) {
+      event.stopPropagation();
+      closeSyncMenu();
+      closeAllMultiSelects();
+      var willOpen = els.viewMenu.hidden;
+      closeViewMenu();
+      if (willOpen) {
+        els.viewMenu.hidden = false;
+        els.viewMenuBtn.setAttribute("aria-expanded", "true");
+        if (els.viewToggle) els.viewToggle.classList.add("is-open");
+      }
+    });
+    els.viewMenu.addEventListener("click", function (event) {
+      event.stopPropagation();
+      var opt = event.target.closest("[data-view]");
+      if (!opt) return;
+      setView(opt.getAttribute("data-view"));
+    });
+  }
+
+  if (els.viewSelect) {
+    els.viewSelect.addEventListener("change", function () {
+      setView(els.viewSelect.value || "list");
     });
   }
 
@@ -4575,6 +5814,9 @@
 
   function csvEscape(value) {
     var text = value == null ? "" : String(value);
+    if (/^[=+\-@]/.test(text)) {
+      text = "'" + text;
+    }
     if (/[",\n\r]/.test(text)) {
       return '"' + text.replace(/"/g, '""') + '"';
     }
@@ -4649,38 +5891,68 @@
     );
   }
 
-  function shiftCalendarMonth(delta) {
-    state.calendarMonth = startOfMonth(
-      new Date(
-        state.calendarMonth.getFullYear(),
-        state.calendarMonth.getMonth() + delta,
-        1
-      )
-    );
+  if (els.copyListBtn) {
+    els.copyListBtn.addEventListener("click", copyVisibleList);
+  }
+
+  function shiftCalendar(delta) {
+    if (state.calendarMode === "week") {
+      state.calendarWeekStart = startOfWeek(
+        addCalendarDays(state.calendarWeekStart || new Date(), delta * 7)
+      );
+    } else {
+      state.calendarMonth = startOfMonth(
+        new Date(
+          state.calendarMonth.getFullYear(),
+          state.calendarMonth.getMonth() + delta,
+          1
+        )
+      );
+    }
     state.expandedCalDay = null;
     if (state.view === "calendar") renderTable();
   }
 
   if (els.calPrev) {
     els.calPrev.addEventListener("click", function () {
-      shiftCalendarMonth(-1);
+      shiftCalendar(-1);
     });
   }
   if (els.calNext) {
     els.calNext.addEventListener("click", function () {
-      shiftCalendarMonth(1);
+      shiftCalendar(1);
     });
   }
   if (els.calToday) {
     els.calToday.addEventListener("click", function () {
-      var nextMonth = startOfMonth(new Date());
-      var monthChanged =
-        !state.calendarMonth ||
-        state.calendarMonth.getFullYear() !== nextMonth.getFullYear() ||
-        state.calendarMonth.getMonth() !== nextMonth.getMonth();
-      state.calendarMonth = nextMonth;
-      if (monthChanged) state.expandedCalDay = null;
+      var today = new Date();
+      if (state.calendarMode === "week") {
+        var nextWeek = startOfWeek(today);
+        var weekChanged =
+          !state.calendarWeekStart ||
+          dateKey(state.calendarWeekStart) !== dateKey(nextWeek);
+        state.calendarWeekStart = nextWeek;
+        if (weekChanged) state.expandedCalDay = null;
+      } else {
+        var nextMonth = startOfMonth(today);
+        var monthChanged =
+          !state.calendarMonth ||
+          state.calendarMonth.getFullYear() !== nextMonth.getFullYear() ||
+          state.calendarMonth.getMonth() !== nextMonth.getMonth();
+        state.calendarMonth = nextMonth;
+        if (monthChanged) state.expandedCalDay = null;
+      }
       if (state.view === "calendar") renderTable();
+    });
+  }
+  if (els.calModeMonth) {
+    els.calModeMonth.addEventListener("click", function () {
+      setCalendarMode("month");
+    });
+  }
+  if (els.calModeWeek) {
+    els.calModeWeek.addEventListener("click", function () {
+      setCalendarMode("week");
     });
   }
 
@@ -4725,6 +5997,7 @@
   document.addEventListener("click", function () {
     closeAllMultiSelects();
     closeSyncMenu();
+    closeViewMenu();
   });
 
   function isTypingTarget(target) {
@@ -4734,9 +6007,42 @@
     return Boolean(target.isContentEditable);
   }
 
+  function moveRowSelection(key) {
+    var active = document.activeElement;
+    if (
+      key === "Enter" &&
+      active &&
+      active.closest &&
+      active.closest("button, a, select, input, textarea")
+    ) {
+      return;
+    }
+    var rows = Array.prototype.slice.call(document.querySelectorAll(".hub-row"));
+    if (!rows.length) return;
+    var idx = -1;
+    rows.forEach(function (row, i) {
+      if (row.getAttribute("data-row-id") === state.selectedRowId) idx = i;
+    });
+    if (key === "Enter") {
+      var item = (state.visibleItems || []).find(function (row) {
+        return row.id === state.selectedRowId;
+      });
+      if (item && item.cardUrl) {
+        openSafeCardUrl(item.cardUrl);
+      }
+      return;
+    }
+    if (idx < 0) idx = 0;
+    else idx += key === "j" ? 1 : -1;
+    if (idx < 0) idx = 0;
+    if (idx >= rows.length) idx = rows.length - 1;
+    state.selectedRowId = rows[idx].getAttribute("data-row-id");
+    highlightSelectedRow();
+    if (rows[idx].scrollIntoView) rows[idx].scrollIntoView({ block: "nearest" });
+  }
+
   function focusSearchField() {
     if (!els.filterSearch) return;
-    if (!state.filtersOpen) setConfigOpen(true);
     els.filterSearch.focus();
     els.filterSearch.select();
   }
@@ -4777,6 +6083,11 @@
         event.preventDefault();
         return;
       }
+      if (els.ganttChecklistModal && !els.ganttChecklistModal.hidden) {
+        closeGanttChecklistModal();
+        event.preventDefault();
+        return;
+      }
       if (els.scanConfirmModal && !els.scanConfirmModal.hidden) {
         closeScanConfirm();
         event.preventDefault();
@@ -4795,6 +6106,12 @@
       if (els.syncMenu && !els.syncMenu.hidden) {
         closeSyncMenu();
         if (els.syncMenuBtn) els.syncMenuBtn.focus();
+        event.preventDefault();
+        return;
+      }
+      if (els.viewMenu && !els.viewMenu.hidden) {
+        closeViewMenu();
+        if (els.viewMenuBtn) els.viewMenuBtn.focus();
         event.preventDefault();
         return;
       }
@@ -4837,16 +6154,42 @@
     }
     if (key === "1") {
       event.preventDefault();
-      state.view = "list";
-      savePrefs({ view: state.view });
-      renderTable();
+      setView("list");
       return;
     }
     if (key === "2") {
       event.preventDefault();
-      state.view = "calendar";
-      savePrefs({ view: state.view });
-      renderTable();
+      setView("agenda");
+      return;
+    }
+    if (key === "3") {
+      event.preventDefault();
+      setView("horizon");
+      return;
+    }
+    if (key === "4") {
+      event.preventDefault();
+      setView("workload");
+      return;
+    }
+    if (key === "5") {
+      event.preventDefault();
+      setView("progress");
+      return;
+    }
+    if (key === "6") {
+      event.preventDefault();
+      setView("gantt");
+      return;
+    }
+    if (key === "7") {
+      event.preventDefault();
+      setView("calendar");
+      return;
+    }
+    if (key === "j" || key === "k" || key === "Enter") {
+      moveRowSelection(key);
+      event.preventDefault();
     }
   });
 
@@ -4876,6 +6219,7 @@
     });
   });
   syncSortHeaders();
+  updateFocusChips();
 
   populateSavedViews();
 

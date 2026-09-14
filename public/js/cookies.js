@@ -55,7 +55,13 @@
   }
 
   function writeJsonCookie(name, value, days) {
-    setCookie(name, JSON.stringify(value), days);
+    try {
+      setCookie(name, JSON.stringify(value), days);
+    } catch (e) {
+      if (typeof console !== "undefined" && console.warn) {
+        console.warn("Checklist Hub could not save preferences:", e.message || e);
+      }
+    }
   }
 
   /** Remove legacy localStorage keys that held Trello payloads / prefs. */

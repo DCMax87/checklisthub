@@ -21,6 +21,18 @@
     });
   }
 
+  function openSettings(t) {
+    return t
+      .getRestApi()
+      .isAuthorized()
+      .then(function (isAuthorized) {
+        return isAuthorized ? openDashboard(t) : openAuthorize(t);
+      })
+      .catch(function () {
+        return openAuthorize(t);
+      });
+  }
+
   window.TrelloPowerUp.initialize(
     {
       "board-buttons": function (t) {
@@ -55,11 +67,7 @@
           });
       },
       "show-settings": function (t) {
-        return t.popup({
-          title: "Checklist Hub",
-          url: "./authorize.html",
-          height: 240,
-        });
+        return openSettings(t);
       },
     },
     {

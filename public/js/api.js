@@ -7,11 +7,12 @@
 
   /**
    * Ephemeral in-memory only while this page/modal is open.
-   * Cleared on Load checklists and when the tab closes — never sessionStorage/localStorage.
+   * Cleared on Load boards and when the tab closes — never sessionStorage/localStorage.
    */
   let memoryCache = null;
+  const apiUsageEvents = [];
   const TEAM_CHECKLIST_RE = /^Checklist Hub Team:\s*(.+)$/i;
-  const API_LOG_MAX = 500;
+  const API_LOG_MAX = 200;
 
   function sleep(ms) {
     return new Promise(function (resolve) {
@@ -47,16 +48,18 @@
   }
 
   function logApiUsage(units, label) {
-    const root = document.getElementById("api-usage-log");
-    if (!root) return;
-    const row = document.createElement("div");
-    row.setAttribute("data-at", String(Date.now()));
-    row.setAttribute("data-units", String(Math.max(1, Number(units) || 1)));
-    row.setAttribute("data-label", String(label || "request"));
-    root.appendChild(row);
-    while (root.children.length > API_LOG_MAX) {
-      root.removeChild(root.firstChild);
+    apiUsageEvents.push({
+      at: Date.now(),
+      units: Math.max(1, Number(units) || 1),
+      label: String(label || "request"),
+    });
+    while (apiUsageEvents.length > API_LOG_MAX) {
+      apiUsageEvents.shift();
     }
+  }
+
+  function getApiUsageEvents() {
+    return apiUsageEvents.slice();
   }
 
   async function trelloFetch(path, token, options) {
@@ -130,7 +133,7 @@
         attempt += 1;
         if (attempt > 5) {
           const err = new Error(
-            "Trello is busy right now. Wait a minute, then try Update status or Load checklists again."
+            "Trello is busy right now. Wait a minute, then try Update status or Load boards again."
           );
           err.name = "TrelloRateLimitError";
           err.status = 429;
@@ -169,7 +172,7 @@
           response.status === 401 || response.status === 403
             ? "Trello refused access. Re-authorize Checklist Hub, or ask an admin to confirm the Power-Up and your board permissions."
             : response.status === 404
-              ? "Trello could not find a board or card that was requested. Try Load checklists again; it may have been closed or removed."
+              ? "Trello could not find a board or card that was requested. Try Load boards again; it may have been closed or removed."
               : response.status >= 500
                 ? "Trello had a server problem. Wait a moment and try again."
                 : "Something went wrong talking to Trello. Try again, or share the technical details with an admin.";
@@ -224,6 +227,30 @@
       checkItem_fields: "all",
     });
     return "/boards/" + boardId + "?" + q.toString();
+  }
+
+  /** Lightweight board GET for Checklist Hub Team: … discovery (no cards/lists). */
+  function teamConfigRoute(boardId) {
+    const q = new URLSearchParams({
+      fields: "id,name",
+      members: "all",
+      member_fields: "id,fullName,username",
+      checklists: "all",
+      checkItems: "all",
+      checkItem_fields: "name,idMember",
+      cards: "none",
+      lists: "none",
+      labels: "none",
+    });
+    return "/boards/" + boardId + "?" + q.toString();
+  }
+
+  function allowlistCacheKey(boardIds) {
+    return (Array.isArray(boardIds) ? boardIds : [])
+      .map(String)
+      .filter(Boolean)
+      .sort()
+      .join(",");
   }
 
   function boardChecklistsRoute(boardId) {
@@ -470,30 +497,6 @@
     });
   }
 
-  function flattenBoard(board, cards, membersById, listNameById) {
-    const items = [];
-    const seen = {};
-    (cards || []).forEach(function (card) {
-      (card.checklists || []).forEach(function (checklist) {
-        if (isTeamConfigChecklist(checklist.name)) return;
-        (checklist.checkItems || []).forEach(function (checkItem) {
-          if (!checkItem || !checkItem.id || seen[checkItem.id]) return;
-          seen[checkItem.id] = true;
-          pushCheckItem(
-            items,
-            board,
-            card,
-            checklist,
-            checkItem,
-            membersById,
-            listNameById
-          );
-        });
-      });
-    });
-    return items;
-  }
-
   function flattenFromBoardPayload(board, payload, membersById) {
     const cardsById = {};
     (payload.cards || []).forEach(function (card) {
@@ -564,13 +567,14 @@
       const seenMembers = {};
       const seenLinks = {};
       (checklist.checkItems || []).forEach(function (checkItem) {
-        if (checkItem.idMember) {
-          if (seenMembers[checkItem.idMember]) return;
-          seenMembers[checkItem.idMember] = true;
-          team.memberIds.push(checkItem.idMember);
+        const memberId = normalizeMemberId(checkItem.idMember);
+        if (memberId) {
+          if (seenMembers[memberId]) return;
+          seenMembers[memberId] = true;
+          team.memberIds.push(memberId);
           team.members.push(
-            membersById[checkItem.idMember] || {
-              id: checkItem.idMember,
+            membersById[memberId] || {
+              id: memberId,
               fullName: "Member",
               username: "",
             }
@@ -596,7 +600,7 @@
     if (!boardId) {
       return { board: null, teams: [], members: [] };
     }
-    const payload = await trelloFetch(boardNestedRoute(boardId), token, {
+    const payload = await trelloFetch(teamConfigRoute(boardId), token, {
       signal: opts.signal || null,
       label: "team-config",
       units: 1,
@@ -675,11 +679,36 @@
       }
     });
 
+    const cardStats = {};
+    items.forEach(function (item) {
+      if (!item || !item.cardId || item.kind === "reminder") return;
+      if (!cardStats[item.cardId]) {
+        cardStats[item.cardId] = { total: 0, checklists: {} };
+      }
+      cardStats[item.cardId].total += 1;
+      if (item.checklistId) {
+        cardStats[item.cardId].checklists[item.checklistId] = true;
+      }
+    });
+
     const out = [];
     (cards || []).forEach(function (card) {
       const memberIds = (card.idMembers || []).map(normalizeMemberId);
       if (memberIds.indexOf(myId) === -1) return;
       if (cardIdsWithMyTasks[card.id]) return;
+
+      const stats = cardStats[card.id] || { total: 0, checklists: {} };
+      const listCount = Object.keys(stats.checklists).length;
+      const checklistName = !stats.total
+        ? "You're on this card · no checklist items"
+        : "You're on this card · " +
+          (listCount
+            ? listCount + " checklist" + (listCount === 1 ? "" : "s") + " · "
+            : "") +
+          stats.total +
+          " item" +
+          (stats.total === 1 ? "" : "s") +
+          " · none assigned to you";
 
       out.push({
         kind: "card",
@@ -693,7 +722,9 @@
         assigneeName:
           (membersById[myId] && membersById[myId].fullName) || "You",
         checklistId: null,
-        checklistName: "Card membership · no checklist tasks for you",
+        checklistName: checklistName,
+        checklistItemCount: stats.total,
+        checklistCount: listCount,
         cardId: card.id,
         cardName: card.name,
         cardUrl: card.shortUrl || card.url,
@@ -708,6 +739,28 @@
       });
     });
     return out;
+  }
+
+  function membershipCaption(items) {
+    const real = (items || []).filter(function (item) {
+      return item && item.kind !== "reminder";
+    });
+    if (!real.length) return "You're on this card · no checklist items";
+    const lists = {};
+    real.forEach(function (item) {
+      if (item.checklistId) lists[item.checklistId] = true;
+    });
+    const listCount = Object.keys(lists).length;
+    return (
+      "You're on this card · " +
+      (listCount
+        ? listCount + " checklist" + (listCount === 1 ? "" : "s") + " · "
+        : "") +
+      real.length +
+      " item" +
+      (real.length === 1 ? "" : "s") +
+      " · none assigned to you"
+    );
   }
 
   function payloadLooksComplete(payload) {
@@ -782,11 +835,24 @@
     let httpCalls = 0;
     let bootstrapUnits = 0;
 
-    if (opts.me && opts.boards && opts.boards.length) {
-      // Scoped refresh: caller already knows member + board ids (no bootstrap).
+    if (opts.me && (opts.allBoards || opts.boards)) {
+      // Caller already has catalog member + boards (skip bootstrap).
       me = opts.me;
-      boards = opts.boards.slice();
-      allBoards = opts.allBoards || boards.slice();
+      allBoards = (opts.allBoards || opts.boards || []).slice();
+      const selected = Array.isArray(allowlist) ? allowlist : [];
+      if (selected.length) {
+        const allowed = {};
+        selected.forEach(function (id) {
+          allowed[id] = true;
+        });
+        boards = allBoards.filter(function (b) {
+          return allowed[b.id];
+        });
+      } else if (opts.boards && opts.boards.length) {
+        boards = opts.boards.slice();
+      } else {
+        boards = [];
+      }
     } else {
       // One HTTP round-trip, two rate-limit units (batch counts each URL).
       const bootstrap = await fetchBatch(
@@ -1200,12 +1266,15 @@
     const opts = options || {};
     const cached = readCache();
     const ttl = config.cacheTtlMs || 5 * 60 * 1000;
+    const boardIds = Array.isArray(opts.boardIds) ? opts.boardIds : [];
+    const cacheKey = allowlistCacheKey(boardIds);
 
     if (
       !opts.forceRefresh &&
       cached &&
       cached.me &&
       cached.fetchedAt &&
+      cached.allowlistKey === cacheKey &&
       Date.now() - cached.fetchedAt < ttl
     ) {
       return { data: withRemindersExpanded(cached), fromCache: true };
@@ -1213,9 +1282,13 @@
 
     const data = await loadBoardsBundle(token, {
       onProgress: opts.onProgress,
-      boardIds: Array.isArray(opts.boardIds) ? opts.boardIds : [],
+      boardIds: boardIds,
       signal: opts.signal || null,
+      me: opts.me || null,
+      boards: opts.boards || null,
+      allBoards: opts.allBoards || null,
     });
+    data.allowlistKey = cacheKey;
     writeCache(data);
     return { data: data, fromCache: false };
   }
@@ -1289,15 +1362,21 @@
     return source;
   }
 
-  function applyCardRefresh(source, cardId, fresh) {
+  function applyCardRefresh(source, cardId, fresh, options) {
     let updated = 0;
     let removed = 0;
     let added = 0;
+    const opts = options || {};
     const meId = source.me && source.me.id;
     const membersById = {};
     (source.members || []).forEach(function (m) {
       membersById[m.id] = m;
     });
+
+    // Failed fetches must not wipe rows — only closed/missing cards do.
+    if (opts.fetchFailed) {
+      return { updated: 0, removed: 0, added: 0, skipped: 1 };
+    }
 
     if (!fresh || fresh.closed) {
       const beforeItems = (source.items || []).length;
@@ -1342,7 +1421,7 @@
     (fresh.checklists || []).forEach(function (checklist) {
       if (isTeamConfigChecklist(checklist.name)) return;
       (checklist.checkItems || []).forEach(function (checkItem) {
-        const memberId = checkItem.idMember || null;
+        const memberId = normalizeMemberId(checkItem.idMember);
         nextItems.push({
           kind: "checkitem",
           id: checkItem.id,
@@ -1453,7 +1532,10 @@
         assigneeName:
           (membersById[meId] && membersById[meId].fullName) || "You",
         checklistId: null,
-        checklistName: "Card membership · no checklist tasks for you",
+        checklistName: membershipCaption(retainedItems),
+        checklistItemCount: (retainedItems || []).filter(function (item) {
+          return item && item.kind !== "reminder";
+        }).length,
         cardId: fresh.id,
         cardName: fresh.name,
         cardUrl: fresh.shortUrl || fresh.url,
@@ -1562,10 +1644,10 @@
       };
     }
 
-    // With hundreds of checklist items, prefer board-scoped refresh whenever it
-    // uses fewer or equal rate units (almost always: many items share boards).
+    // Prefer per-card when unit counts are close — board GETs pull large
+    // nested payloads. Use board strategy only when it clearly saves units.
     const useBoardStrategy =
-      uniqueBoards.length > 0 && uniqueBoards.length <= uniqueCards.length;
+      uniqueBoards.length > 0 && uniqueBoards.length * 2 < uniqueCards.length;
 
     if (useBoardStrategy) {
       const boardSummaries = uniqueBoards.map(function (id) {
@@ -1639,7 +1721,7 @@
           strategy:
             "scoped board status refresh (" +
             uniqueBoards.length +
-            " boards ≤ " +
+            " boards ≪ " +
             uniqueCards.length +
             " cards)",
           boardErrors: (slice.meta && slice.meta.boardErrors) || [],
@@ -1651,6 +1733,7 @@
     let updated = 0;
     let removed = 0;
     let added = 0;
+    let skipped = 0;
     const routes = uniqueCards.map(cardRefreshRoute);
     const chunks = chunk(routes, BATCH_SIZE);
 
@@ -1669,11 +1752,19 @@
       chunks[i].forEach(function (route, idx) {
         const cardId = route.split("?")[0].replace("/cards/", "");
         const status = batchItemStatus(batch[idx]);
-        const stats = applyCardRefresh(
-          source,
-          cardId,
-          status.ok ? status.data : null
-        );
+        if (!status.ok) {
+          // 404 / closed: remove. Other failures: keep existing rows.
+          if (status.status === 404) {
+            const stats = applyCardRefresh(source, cardId, null);
+            updated += stats.updated;
+            removed += stats.removed;
+            added += stats.added;
+          } else {
+            skipped += 1;
+          }
+          return;
+        }
+        const stats = applyCardRefresh(source, cardId, status.data);
         updated += stats.updated;
         removed += stats.removed;
         added += stats.added;
@@ -1695,12 +1786,15 @@
         updated: updated,
         removed: removed,
         added: added,
+        skipped: skipped,
         strategy:
           "per-card nested checklists (" +
           uniqueCards.length +
-          " cards ≤ " +
-          uniqueBoards.length +
-          " boards)",
+          " cards" +
+          (uniqueBoards.length
+            ? ", " + uniqueBoards.length + " boards"
+            : "") +
+          ")",
       },
     };
   }
@@ -1710,13 +1804,7 @@
   }
 
   async function refreshKnownMemberCards(token, data, options) {
-    // Member cards are included in refreshKnownStatus; keep API surface stable.
-    return {
-      data: data || readCache(),
-      fromCache: false,
-      statusOnly: true,
-      meta: { httpCalls: 0, checked: 0, updated: 0, removed: 0 },
-    };
+    return refreshKnownStatus(token, data, options);
   }
 
   global.ChecklistHubApi = {
@@ -1727,9 +1815,13 @@
     refreshKnownMemberCards: refreshKnownMemberCards,
     clearCache: clearCache,
     readCache: readCache,
-    withRemindersExpanded: withRemindersExpanded,
+    getApiUsageEvents: getApiUsageEvents,
     loadTeamConfig: loadTeamConfig,
     resolveBoardShortLinks: resolveBoardShortLinks,
+    withRemindersExpanded: withRemindersExpanded,
+    normalizeMemberId: normalizeMemberId,
+    applyCardRefresh: applyCardRefresh,
+    allowlistCacheKey: allowlistCacheKey,
     parseTeamsFromBoardPayload: parseTeamsFromBoardPayload,
     extractShortLink: extractShortLink,
     isTeamConfigChecklist: isTeamConfigChecklist,

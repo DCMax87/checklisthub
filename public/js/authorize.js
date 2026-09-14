@@ -26,7 +26,7 @@
     t.getRestApi()
       .authorize({
         scope: "read",
-        expiration: "never",
+        expiration: (config && config.oauthExpiration) || "30days",
       })
       .then(function () {
         setStatus("Authorized. Opening Checklist Hub…");

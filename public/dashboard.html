@@ -5,7 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Checklist Hub</title>
     <link rel="icon" href="./icons/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./css/dashboard.css?v=20260911d" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' https://p.trellocdn.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: https:; connect-src https://api.trello.com https://trello.com; frame-ancestors https://trello.com https://*.trello.com; object-src 'none'; base-uri 'none'"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./css/dashboard.css?v=20260914ad" />
+    <script src="./js/theme-boot.js?v=20260914ad"></script>
   </head>
   <body class="dashboard-page">
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -14,7 +29,7 @@
       <div class="topbar-brand">
         <img
           class="brand-mark"
-          src="./icons/icon.png"
+          src="./icons/hub-dark.svg"
           alt=""
           width="36"
           height="36"
@@ -26,28 +41,81 @@
         </div>
       </div>
       <div class="topbar-actions">
-        <div class="view-toggle" id="view-toggle" hidden role="group" aria-label="View">
+        <div class="view-toggle" id="view-toggle" hidden>
           <button
             type="button"
-            class="view-btn is-active"
-            data-view="list"
-            aria-label="List view"
-            aria-pressed="true"
+            id="view-menu-btn"
+            class="view-menu-btn"
+            aria-haspopup="listbox"
+            aria-expanded="false"
+            aria-controls="view-menu"
+            title="Change view"
           >
-            <span class="material-symbols-outlined" aria-hidden="true">view_list</span>
-            <span class="btn-label">List</span>
+            <span
+              class="material-symbols-outlined"
+              id="view-menu-icon"
+              aria-hidden="true"
+              >view_list</span
+            >
+            <span class="view-menu-label" id="view-menu-label">List</span>
+            <span class="material-symbols-outlined view-menu-caret" aria-hidden="true"
+              >expand_more</span
+            >
           </button>
-          <button
-            type="button"
-            class="view-btn"
-            data-view="calendar"
-            aria-label="Calendar view"
-            aria-pressed="false"
-          >
-            <span class="material-symbols-outlined" aria-hidden="true">calendar_month</span>
-            <span class="btn-label">Calendar</span>
-          </button>
+          <div id="view-menu" class="view-menu" role="listbox" hidden>
+            <button type="button" role="option" data-view="list" aria-selected="true">
+              <span class="material-symbols-outlined" aria-hidden="true">view_list</span>
+              List
+            </button>
+            <button type="button" role="option" data-view="agenda" aria-selected="false">
+              <span class="material-symbols-outlined" aria-hidden="true">view_agenda</span>
+              Agenda
+            </button>
+            <button type="button" role="option" data-view="horizon" aria-selected="false">
+              <span class="material-symbols-outlined" aria-hidden="true">stacked_bar_chart</span>
+              Horizon
+            </button>
+            <button type="button" role="option" data-view="workload" aria-selected="false">
+              <span class="material-symbols-outlined" aria-hidden="true">group</span>
+              Workload
+            </button>
+            <button type="button" role="option" data-view="progress" aria-selected="false">
+              <span class="material-symbols-outlined" aria-hidden="true">donut_large</span>
+              Card progress
+            </button>
+            <button type="button" role="option" data-view="gantt" aria-selected="false">
+              <span class="material-symbols-outlined" aria-hidden="true">view_timeline</span>
+              Gantt
+            </button>
+            <button type="button" role="option" data-view="calendar" aria-selected="false">
+              <span class="material-symbols-outlined" aria-hidden="true">calendar_month</span>
+              Calendar
+            </button>
+          </div>
+          <label class="sr-only" for="view-select">View</label>
+          <select id="view-select" class="sr-only" aria-hidden="true" tabindex="-1">
+            <option value="list">List</option>
+            <option value="agenda">Agenda</option>
+            <option value="horizon">Horizon</option>
+            <option value="workload">Workload</option>
+            <option value="progress">Card progress</option>
+            <option value="gantt">Gantt</option>
+            <option value="calendar">Calendar</option>
+          </select>
         </div>
+        <button
+          type="button"
+          id="theme-toggle"
+          class="btn btn-ghost"
+          hidden
+          title="Switch to dark mode"
+          aria-pressed="false"
+        >
+          <span class="material-symbols-outlined" aria-hidden="true" id="theme-toggle-icon"
+            >dark_mode</span
+          >
+          <span class="btn-label sr-only" id="theme-toggle-label">Dark mode</span>
+        </button>
         <button
           type="button"
           id="config-toggle"
@@ -120,14 +188,17 @@
           <p id="filter-summary" class="filter-summary"></p>
           <div class="focus-tools">
             <div class="focus-chips" id="focus-chips" role="group" aria-label="Quick due filters">
-              <button type="button" class="chip chip-emphasis" data-due-chip="myday" aria-pressed="false">
+              <button type="button" class="chip chip-emphasis is-active" data-due-chip="all" aria-pressed="true">
+                All dates
+              </button>
+              <button type="button" class="chip" data-due-chip="myday" aria-pressed="false">
                 My day
               </button>
               <button type="button" class="chip" data-due-chip="overdue" aria-pressed="false">Overdue</button>
               <button type="button" class="chip" data-due-chip="today" aria-pressed="false">Today</button>
+              <button type="button" class="chip" data-due-chip="tomorrow" aria-pressed="false">Tomorrow</button>
               <button type="button" class="chip" data-due-chip="week" aria-pressed="false">7 days</button>
               <button type="button" class="chip" data-due-chip="none" aria-pressed="false">Undated</button>
-              <button type="button" class="chip" data-due-chip="all" aria-pressed="true">All</button>
             </div>
             <div class="focus-search">
               <label class="sr-only" for="filter-search">Search</label>
@@ -146,10 +217,20 @@
             id="scan-nudge"
             class="scan-nudge"
             hidden
-            title="Load boards to pick up newly assigned work"
+            title="Look again for work assigned since the last load"
           >
             <span class="material-symbols-outlined" aria-hidden="true">radar</span>
-            Load boards for new assignments?
+            <span class="scan-nudge-label">Check for new tasks</span>
+          </button>
+          <button
+            type="button"
+            id="copy-list-btn"
+            class="btn btn-ghost"
+            hidden
+            title="Copy the current view as a markdown list"
+          >
+            <span class="material-symbols-outlined" aria-hidden="true">content_copy</span>
+            <span class="btn-label">Copy list</span>
           </button>
           <button
             type="button"
@@ -181,29 +262,21 @@
           <span class="material-symbols-outlined" aria-hidden="true">close</span>
         </button>
         <div class="config-grid">
-          <div class="field field-work-type">
-            <div class="field-label-block">
-              <label class="field-label" for="filter-work-type">Show</label>
-            </div>
-            <select id="filter-work-type">
-              <option value="both">Tasks + member cards</option>
-              <option value="checkitem">Checklist tasks only</option>
-              <option value="card">Member cards without tasks</option>
-            </select>
-          </div>
-          <div class="field field-due">
-            <div class="field-label-block">
-              <label class="field-label" for="filter-due">Due</label>
-            </div>
-            <select id="filter-due">
-              <option value="all">Any due date</option>
-              <option value="myday">My day (overdue + today)</option>
-              <option value="overdue">Overdue</option>
-              <option value="today">Due today</option>
-              <option value="week">Due in 7 days</option>
-              <option value="none">No due date</option>
-            </select>
-          </div>
+          <!-- Synced from due chips / Hide cards; kept out of the visual filter grid -->
+          <select id="filter-due" class="sr-only" aria-hidden="true" tabindex="-1">
+            <option value="all" selected>Any due date</option>
+            <option value="myday">My day (overdue + today)</option>
+            <option value="overdue">Overdue</option>
+            <option value="today">Due today</option>
+            <option value="tomorrow">Due tomorrow</option>
+            <option value="week">Due in 7 days</option>
+            <option value="none">No due date</option>
+          </select>
+          <select id="filter-work-type" class="sr-only" aria-hidden="true" tabindex="-1">
+            <option value="both">Tasks + member cards</option>
+            <option value="checkitem">Checklist tasks only</option>
+            <option value="card">Member cards without tasks</option>
+          </select>
           <div class="field" id="group-page-size-field">
             <div class="field-label-block">
               <label class="field-label" for="filter-group-page-size"
@@ -230,9 +303,11 @@
             </select>
             <p id="filter-team-hint" class="field-hint">
               Teams come from checklists named
-              <code>Checklist Hub Team: …</code> on the board you opened from.
-              Choosing a team sets Assignees and preselects Boards.
-              Group by Assignee to list Unassigned last.
+              <code>Checklist Hub Team: …</code> on the board you opened this
+              Power-Up from. Open Checklist Hub from that board to load teams;
+              otherwise tick boards under Filters yourself. Choosing a team sets
+              Assignees and preselects Boards. Group by Assignee to list
+              Unassigned last.
             </p>
           </div>
           <div class="field field-assignee">
@@ -457,6 +532,7 @@
         <div class="stage-bar-controls">
           <label
             class="stage-check"
+            id="stage-hide-completed"
             title="When checked, completed items stay hidden"
           >
             <input type="checkbox" id="filter-hide-completed" checked />
@@ -464,7 +540,16 @@
           </label>
           <label
             class="stage-check"
-            title="Show lead-day reminder rows in Due today and Due tomorrow"
+            id="stage-hide-cards"
+            title="Hide member cards that have no checklist tasks. In Gantt, those card-only rows disappear; checklist bars stay."
+          >
+            <input type="checkbox" id="filter-hide-cards" />
+            <span>Hide cards</span>
+          </label>
+          <label
+            class="stage-check"
+            id="stage-reminders"
+            title="Show lead-day reminder rows for tasks and cards"
           >
             <input type="checkbox" id="filter-reminders" />
             <span>Reminders</span>
@@ -563,7 +648,6 @@
             <caption class="sr-only">Checklist items and member cards</caption>
             <thead>
               <tr>
-                <th class="col-type sortable" data-sort="kind" scope="col" tabindex="0">Type</th>
                 <th class="col-item sortable" data-sort="name" scope="col" tabindex="0">Title</th>
                 <th class="col-board sortable" data-sort="boardName" scope="col" tabindex="0">Board</th>
                 <th class="col-card sortable" data-sort="cardName" scope="col" tabindex="0">Card</th>
@@ -576,6 +660,7 @@
           </table>
         </div>
 
+        <section class="insight-wrap" id="insight-wrap" hidden aria-label="Insight view"></section>
         <section class="calendar-wrap" id="calendar-wrap" hidden aria-label="Calendar">
           <div class="calendar-toolbar">
             <button type="button" id="cal-prev" class="btn btn-ghost" aria-label="Previous month">
@@ -591,6 +676,26 @@
               <span class="material-symbols-outlined" aria-hidden="true">today</span>
               <span class="btn-label">Today</span>
             </button>
+            <div class="calendar-mode" role="group" aria-label="Calendar range">
+              <button
+                type="button"
+                id="cal-mode-month"
+                class="chip"
+                data-cal-mode="month"
+                aria-pressed="true"
+              >
+                Month
+              </button>
+              <button
+                type="button"
+                id="cal-mode-week"
+                class="chip"
+                data-cal-mode="week"
+                aria-pressed="false"
+              >
+                Week
+              </button>
+            </div>
           </div>
           <div class="calendar-weekdays" aria-hidden="true">
             <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span>
@@ -617,7 +722,28 @@
         Request activity
       </button>
       <span class="footer-sep" aria-hidden="true">·</span>
-      <span class="footer-note">Read-only · data stays in this browser session</span>
+      <button
+        type="button"
+        id="disconnect-btn"
+        class="linkish footer-privacy-btn"
+        hidden
+      >
+        Disconnect
+      </button>
+      <span class="footer-sep" id="disconnect-sep" aria-hidden="true" hidden>·</span>
+      <a
+        id="footer-support"
+        class="linkish footer-privacy-btn"
+        href="#"
+        hidden
+        rel="noopener noreferrer"
+      >Support</a>
+      <span class="footer-sep" id="footer-support-sep" aria-hidden="true" hidden>·</span>
+      <span class="footer-note" id="footer-note"
+        >Read-only · data stays in this browser session</span
+      >
+      <span class="footer-sep" aria-hidden="true">·</span>
+      <span class="footer-note" id="footer-version"></span>
     </footer>
 
     <div id="api-usage-log" hidden aria-hidden="true"></div>
@@ -636,8 +762,10 @@
         <div class="privacy-modal-body">
           <p class="welcome-lead">
             Shows how much this hub talked to Trello this session. Closing the
-            hub clears it. Trello allows a limited burst of requests every few
-            seconds — if things slow down, wait a minute and try again.
+            hub clears it. Shared Power-Up API keys are limited to about
+            <strong>300</strong> request units / 10s; your member token about
+            <strong>100</strong> / 10s. Prefer Update status day to day; wait a
+            minute if things slow down.
           </p>
           <div id="api-usage-summary" class="api-usage-summary"></div>
           <div id="api-usage-buckets" class="api-usage-buckets"></div>
@@ -664,9 +792,8 @@
         <h2 id="privacy-modal-title">Privacy &amp; data</h2>
         <div class="privacy-modal-body">
           <p class="welcome-lead">
-            Checklist Hub is a private, read-only Trello Power-Up. It helps you
-            review checklist work across boards; completing items stays in
-            Trello.
+            Checklist Hub is a read-only Trello Power-Up. It helps you review
+            checklist work across boards; completing items stays in Trello.
           </p>
 
           <h3>How your data is handled</h3>
@@ -682,17 +809,19 @@
               written to cookies, localStorage, or sessionStorage.
             </li>
             <li>
-              Closing the hub clears that data. The next open needs Load
-              checklists again.
+              Closing the hub clears that data. The next open needs
+              <strong>Load boards</strong> again.
             </li>
             <li>
-              Compact UI preferences (saved board picks, saved views, density,
-              items per group) may be stored in
-              <strong>cookies on this host only</strong>.
+              Compact UI preferences (board ids, saved views, assignee ids,
+              density, theme) may be stored in
+              <strong>cookies on this host only</strong> (~180 days).
             </li>
             <li>
               Your OAuth token is stored by <strong>Trello</strong> in Power-Up
-              plugin data — not by a separate Checklist Hub server.
+              plugin data — not by a separate Checklist Hub server. Use
+              <strong>Disconnect</strong> in the footer to clear it from this
+              Power-Up.
             </li>
           </ul>
 
@@ -724,21 +853,21 @@
             <li>
               <strong>Fonts</strong> — Jost and Material Symbols Outlined from
               Google Fonts (<code>fonts.googleapis.com</code> /
-              <code>fonts.gstatic.com</code>) for typography and icons.
+              <code>fonts.gstatic.com</code>). Your browser may share IP and
+              user-agent with Google when fetching fonts.
             </li>
           </ul>
           <p>
-            Your network path and employer policies still apply when the browser
-            contacts those hosts. Prefer hosting this Power-Up on a trusted HTTPS
-            origin your workspace controls.
+            Prefer hosting this Power-Up on a trusted HTTPS origin with Allowed
+            Origins locked to that host. English UI only.
           </p>
 
           <h3>Disclaimer</h3>
           <p>
-            Checklist Hub is provided as-is for internal workspace use. It does
-            not modify Trello cards. Library and CDN availability, Trello API
-            rate limits, and browser cookie rules are outside the control of this
-            Power-Up’s static files.
+            Checklist Hub is provided as-is. It does not modify Trello cards.
+            CDN availability, Trello API rate limits (per API key and per token),
+            and browser cookie rules are outside the control of these static
+            files.
           </p>
         </div>
         <div class="welcome-actions">
@@ -871,12 +1000,56 @@
       </div>
     </div>
 
-    <script src="./config.js?v=20260910b"></script>
+    <div
+      id="gantt-checklist-modal"
+      class="welcome-modal"
+      hidden
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="gantt-checklist-modal-title"
+      aria-describedby="gantt-checklist-modal-meta"
+    >
+      <div class="welcome-backdrop" data-gantt-checklist-close></div>
+      <div class="welcome-dialog gantt-checklist-dialog">
+        <h2 id="gantt-checklist-modal-title">Checklist</h2>
+        <p class="welcome-lead" id="gantt-checklist-modal-meta"></p>
+        <p class="welcome-note" id="gantt-checklist-modal-note" hidden></p>
+        <div class="gantt-checklist-modal-actions">
+          <a
+            id="gantt-checklist-open-card"
+            class="btn btn-primary"
+            href="#"
+            target="_blank"
+            rel="noopener noreferrer"
+            hidden
+          >
+            <span class="material-symbols-outlined" aria-hidden="true">open_in_new</span>
+            <span class="btn-label">Open card in Trello</span>
+          </a>
+        </div>
+        <ul
+          id="gantt-checklist-modal-list"
+          class="gantt-checklist-modal-list"
+          aria-label="Checklist items"
+        ></ul>
+        <div class="welcome-actions">
+          <button type="button" id="gantt-checklist-modal-close" class="btn btn-ghost">
+            <span class="material-symbols-outlined" aria-hidden="true">close</span>
+            <span class="btn-label">Close</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- mock-data.js stays wired so demo.html / top-level opens work without Trello. -->
+    <script src="./config.js?v=20260914ad"></script>
     <script src="https://p.trellocdn.com/power-up.min.js"></script>
-    <script src="./js/cookies.js?v=20260910a"></script>
-    <script src="./js/prefs.js?v=20260911b"></script>
-    <script src="./js/mock-data.js?v=20260911f"></script>
-    <script src="./js/api.js?v=20260911e"></script>
-    <script src="./js/dashboard.js?v=20260911g"></script>
+    <script src="./js/demo-mode.js?v=20260914ad"></script>
+    <script src="./js/cookies.js?v=20260914ad"></script>
+    <script src="./js/prefs.js?v=20260914ad"></script>
+    <script src="./js/mock-data.js?v=20260914ad"></script>
+    <script src="./js/api.js?v=20260914ad"></script>
+    <script src="./js/hub-views.js?v=20260914ad"></script>
+    <script src="./js/dashboard.js?v=20260914ad"></script>
   </body>
 </html>

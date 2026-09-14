@@ -11,6 +11,18 @@
     return 20;
   }
 
+  function pruneCollapsedGroups(map) {
+    var src = map && typeof map === "object" ? map : {};
+    var out = {};
+    var keys = Object.keys(src).filter(function (key) {
+      return src[key];
+    });
+    keys.slice(0, 80).forEach(function (key) {
+      out[String(key).slice(0, 80)] = true;
+    });
+    return out;
+  }
+
   function defaultPrefs() {
     return {
       groupBy: "due",
@@ -22,18 +34,28 @@
       collapsedGroups: {},
       filtersOpen: false,
       density: "comfortable",
+      theme: "light",
       groupPageSize: 20,
       privacyBannerDismissed: false,
       welcomeDismissed: false,
       defaultViewId: "",
       showReminders: false,
       hideCompleted: true,
+      hideCards: false,
+      calendarMode: "month",
     };
   }
 
   function loadPrefs() {
     const stored = cookies.readJson(PREFS_COOKIE, null);
-    return Object.assign(defaultPrefs(), stored || {});
+    const prefs = Object.assign(defaultPrefs(), stored || {});
+    // Week view folded into Calendar (week range).
+    if (prefs.view === "week") {
+      prefs.view = "calendar";
+      prefs.calendarMode = "week";
+    }
+    if (prefs.calendarMode !== "week") prefs.calendarMode = "month";
+    return prefs;
   }
 
   function savePrefs(patch) {
@@ -46,15 +68,18 @@
       sortKey: next.sortKey,
       sortDir: next.sortDir,
       allowlist: (next.allowlist || []).slice(0, 80),
-      collapsedGroups: next.collapsedGroups || {},
+      collapsedGroups: pruneCollapsedGroups(next.collapsedGroups),
       filtersOpen: Boolean(next.filtersOpen),
       density: next.density === "compact" ? "compact" : "comfortable",
+      theme: next.theme === "dark" ? "dark" : "light",
       groupPageSize: normalizeGroupPageSize(next.groupPageSize),
       privacyBannerDismissed: Boolean(next.privacyBannerDismissed),
       welcomeDismissed: Boolean(next.welcomeDismissed),
       defaultViewId: String(next.defaultViewId || "").slice(0, 40),
       showReminders: Boolean(next.showReminders),
       hideCompleted: next.hideCompleted !== false,
+      hideCards: Boolean(next.hideCards),
+      calendarMode: next.calendarMode === "week" ? "week" : "month",
     };
     cookies.writeJson(PREFS_COOKIE, safe, 180);
     return safe;
@@ -77,13 +102,14 @@
         view: view.view || "list",
         sortKey: view.sortKey || "due",
         sortDir: view.sortDir === "desc" ? "desc" : "asc",
-        collapsedGroups: view.collapsedGroups || {},
+        collapsedGroups: pruneCollapsedGroups(view.collapsedGroups),
         assignees: (view.assignees || []).slice(0, 40),
         boards: (view.boards || []).slice(0, 40),
         labels: (view.labels || []).slice(0, 40),
         lists: (view.lists || []).slice(0, 40),
         search: String(view.search || "").slice(0, 80),
         showReminders: Boolean(view.showReminders),
+        hideCards: Boolean(view.hideCards),
       };
     });
     cookies.writeJson(VIEWS_COOKIE, compact, 180);
@@ -115,3 +141,4 @@
     deleteView: deleteView,
   };
 })(window);
+
