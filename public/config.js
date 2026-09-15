@@ -9,7 +9,7 @@
  * For public forks: leave the placeholder and set your own key before hosting.
  */
 window.CHECKLIST_HUB_CONFIG = {
-  appKey: "YOUR_TRELLO_API_KEY",
+  appKey: "b80f2d51e1b906460bc7ff7166238cba",
   appName: "Checklist Hub",
   appAuthor: "Checklist Hub",
   /** Shown in footer / privacy contact. Optional. */
