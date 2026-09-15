@@ -1,0 +1,13 @@
+{
+  "name": "checklist-hub-powerup",
+  "version": "1.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Trello Power-Up: consolidate assigned checklist items across boards",
+  "scripts": {
+    "start": "npx --yes serve public -p 3000",
+    "demo": "npx --yes serve public -p 3000",
+    "start:python": "python -m http.server 3000 --directory public",
+    "test": "node --test tests/refresh-contract.test.js tests/demo-mode.test.js tests/filter-state.test.js tests/date-utils.test.js"
+  }
+}

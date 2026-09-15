@@ -434,13 +434,40 @@ h2 {
   white-space: nowrap;
 }
 
-.config-panel {
-  position: relative;
-  flex-shrink: 0;
-  padding: 12px 48px 12px 16px;
-  background: var(--bg-filters);
-  border-bottom: 2px solid rgba(44, 42, 41, 0.14);
-  box-shadow: inset 0 -1px 0 rgba(107, 187, 174, 0.35);
+.config-dialog {
+  width: min(580px, 100%);
+  max-height: min(90vh, 780px);
+  padding: 22px 48px 18px 24px;
+}
+
+.config-dialog h2 {
+  margin: 0 0 14px;
+  padding-right: 12px;
+  font-size: 1.35rem;
+  font-weight: 500;
+}
+
+.config-dialog .config-grid,
+.config-dialog .config-details-body {
+  grid-template-columns: 1fr;
+}
+
+.config-dialog .field,
+.config-dialog .field-team,
+.config-dialog .field-assignee,
+.config-dialog .field-board,
+.config-dialog .config-details,
+.config-dialog .field-saved,
+.config-dialog .config-details-body > .field {
+  grid-column: 1 / -1;
+}
+
+.config-dialog .field-label-block {
+  min-height: 0;
+}
+
+.config-dialog .welcome-actions {
+  margin-top: 16px;
 }
 
 .config-close {
@@ -456,7 +483,7 @@ h2 {
   height: 32px;
   padding: 0;
   border: 1px solid var(--solid-btn-bg);
-  border-radius: 0;
+  border-radius: var(--radius);
   background: var(--solid-btn-bg);
   color: var(--solid-btn-ink);
   cursor: pointer;
@@ -807,8 +834,8 @@ h2 {
     align-items: flex-start;
   }
 
-  .config-panel {
-    padding: 10px 12px;
+  .config-dialog {
+    padding: 18px 44px 16px 16px;
   }
 
   .config-grid {
@@ -2225,14 +2252,6 @@ input[type="text"]:focus-visible,
   display: none !important;
 }
 
-.config-panel {
-  display: block;
-}
-
-.config-panel[hidden] {
-  display: none !important;
-}
-
 .stage-bar {
   margin: 8px 16px 0;
 }
@@ -2296,6 +2315,12 @@ input[type="text"]:focus-visible,
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
   padding: 24px 24px 20px;
+}
+
+.welcome-dialog.config-dialog {
+  width: min(580px, 100%);
+  max-height: min(90vh, 780px);
+  padding: 22px 48px 18px 24px;
 }
 
 .welcome-dialog h2 {
@@ -4334,6 +4359,277 @@ html[data-theme="dark"] .items-table tbody tr:hover,
 html[data-theme="dark"] tr.is-selected,
 html[data-theme="dark"] .hub-row.is-selected {
   background: rgba(107, 187, 174, 0.14);
+}
+
+/* Focused product shell: daily work first, secondary controls recede. */
+:root {
+  --radius: 6px;
+  --shadow: 0 10px 30px rgba(44, 42, 41, 0.1);
+}
+
+body {
+  font-weight: 400;
+}
+
+.topbar {
+  min-height: 58px;
+  padding: 10px 20px;
+}
+
+.topbar h1 {
+  font-size: 1.2rem;
+  font-weight: 500;
+}
+
+.subtitle,
+.result-count,
+.filter-summary,
+.cache-note {
+  font-size: 0.8rem;
+}
+
+.command-strip {
+  align-items: center;
+  padding: 10px 20px;
+}
+
+.focus-tools {
+  gap: 10px;
+}
+
+.focus-chips {
+  gap: 6px;
+}
+
+.chip {
+  min-height: 32px;
+  border-radius: 999px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+}
+
+.focus-search {
+  width: clamp(170px, 20vw, 260px);
+}
+
+.focus-search input[type="search"] {
+  height: 32px;
+  min-height: 32px;
+  font-size: 0.82rem;
+  border-radius: var(--radius);
+}
+
+.view-menu {
+  min-width: 250px;
+  padding: 6px;
+  border-radius: var(--radius);
+}
+
+.view-menu-section-label {
+  display: block;
+  padding: 8px 10px 4px;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.view-menu-section-label + button {
+  border-top: 1px solid var(--line);
+}
+
+.items-table th {
+  font-size: 0.75rem;
+}
+
+.items-table td,
+.agenda-fact dd {
+  font-size: 0.88rem;
+}
+
+.cal-day {
+  cursor: default;
+}
+
+.cal-day-trigger {
+  appearance: none;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cal-day-trigger:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.cal-item {
+  pointer-events: auto;
+  text-decoration: none;
+}
+
+a.cal-item:hover .cal-item-text,
+a.cal-item:focus-visible .cal-item-text {
+  color: var(--link);
+  text-decoration: underline;
+}
+
+.item-meta,
+.item-list-name,
+.agenda-fact dt {
+  font-size: 0.78rem;
+}
+
+.auth-empty-state {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 32px 20px;
+}
+
+.auth-empty-state[hidden] {
+  display: none !important;
+}
+
+.auth-empty-card {
+  width: min(560px, 100%);
+  padding: 40px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.auth-empty-icon {
+  margin-bottom: 14px;
+  font-size: 2.2rem;
+  color: var(--accent-hover);
+}
+
+.auth-empty-card h2 {
+  font-size: clamp(1.4rem, 4vw, 2rem);
+  font-weight: 500;
+}
+
+.auth-empty-card > p {
+  margin: 12px auto 20px;
+  max-width: 48ch;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.auth-empty-card .auth-empty-note {
+  margin: 14px auto 0;
+  font-size: 0.82rem;
+}
+
+.shortcuts-dialog {
+  width: min(460px, 100%);
+}
+
+.shortcuts-list {
+  display: grid;
+  gap: 0;
+  margin: 18px 0 24px;
+}
+
+.shortcuts-list > div {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 16px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.shortcuts-list dt,
+.shortcuts-list dd {
+  margin: 0;
+}
+
+kbd {
+  display: inline-flex;
+  min-width: 1.8rem;
+  min-height: 1.7rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg-soft);
+  color: var(--ink);
+  font: 600 0.75rem ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+@media (max-width: 720px) {
+  .topbar {
+    align-items: stretch;
+    padding: 10px 12px;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .topbar-actions > * {
+    flex: 0 1 auto;
+  }
+
+  .command-strip {
+    padding: 10px 12px;
+  }
+
+  .command-strip-main,
+  .focus-tools {
+    width: 100%;
+  }
+
+  .command-strip-side {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .cache-note {
+    width: 100%;
+    white-space: normal;
+    line-height: 1.35;
+  }
+
+  .focus-tools {
+    flex-wrap: wrap;
+  }
+
+  .focus-chips {
+    width: 100%;
+  }
+
+  .focus-search {
+    width: 100%;
+    max-width: none;
+  }
+
+  .auth-empty-card {
+    padding: 30px 20px;
+  }
+
+  .stage-bar-controls {
+    width: 100%;
+    margin-left: 0;
+    gap: 10px 12px;
+  }
+
+  .density-toggle {
+    display: none;
+  }
 }
 
 

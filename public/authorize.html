@@ -19,10 +19,12 @@
       href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./css/dashboard.css?v=20260914z" />
+    <link rel="stylesheet" href="./css/dashboard.css?v=20260915d" />
+    <script src="./js/theme-boot.js?v=20260915d"></script>
   </head>
   <body class="auth-page">
-    <main class="auth-card">
+    <a class="skip-link" href="#authorize-main">Skip to authorization</a>
+    <main class="auth-card" id="authorize-main">
       <h1>Connect Checklist Hub</h1>
       <p>
         Allow this Power-Up to read your boards and checklist items so you can
@@ -34,10 +36,14 @@
         <span class="material-symbols-outlined" aria-hidden="true">lock_open</span>
         <span class="btn-label">Authorize with Trello</span>
       </button>
+      <p class="auth-privacy-note">
+        Read-only access. Checklist Hub keeps Trello data in memory only while
+        it is open.
+      </p>
       <p id="auth-status" class="status-text" role="status" aria-live="polite" hidden></p>
     </main>
-    <script src="./config.js?v=20260914z"></script>
+    <script src="./config.js?v=20260915d"></script>
     <script src="https://p.trellocdn.com/power-up.min.js"></script>
-    <script src="./js/authorize.js?v=20260914z"></script>
+    <script src="./js/authorize.js?v=20260915d"></script>
   </body>
 </html>

@@ -33,6 +33,7 @@
   cookies.purgeLegacyBrowserStorage();
 
   var els = {
+    brandMark: document.querySelector(".brand-mark"),
     subtitle: document.getElementById("subtitle"),
     refreshBtn: document.getElementById("refresh-btn"),
     statusBtn: document.getElementById("status-btn"),
@@ -41,10 +42,14 @@
     syncMenu: document.getElementById("sync-menu"),
     syncScanBtn: document.getElementById("sync-scan-btn"),
     authBtn: document.getElementById("auth-btn"),
+    authEmptyState: document.getElementById("auth-empty-state"),
+    authEmptyBtn: document.getElementById("auth-empty-btn"),
     workspace: document.getElementById("workspace"),
     configPanel: document.getElementById("config-panel"),
+    configBackdrop: document.getElementById("config-backdrop"),
     configToggle: document.getElementById("config-toggle"),
     configClose: document.getElementById("config-close"),
+    configDone: document.getElementById("config-done"),
     filterSummary: document.getElementById("filter-summary"),
     prefsBar: document.getElementById("config-panel"),
     filterWorkType: document.getElementById("filter-work-type"),
@@ -173,7 +178,11 @@
     calModeMonth: document.getElementById("cal-mode-month"),
     calModeWeek: document.getElementById("cal-mode-week"),
     assigneeSearch: document.getElementById("assignee-search"),
+    boardSearch: document.getElementById("board-search"),
     copyListBtn: document.getElementById("copy-list-btn"),
+    shortcutsOpenBtn: document.getElementById("shortcuts-open-btn"),
+    shortcutsModal: document.getElementById("shortcuts-modal"),
+    shortcutsModalClose: document.getElementById("shortcuts-modal-close"),
   };
 
   var prefs = prefsApi.loadPrefs();
@@ -212,7 +221,7 @@
     loading: false,
     statusTimer: null,
     statusNudgeDismissedUntil: 0,
-    filtersOpen: Boolean(prefs.filtersOpen),
+    filtersOpen: false,
     searchTimer: null,
     scanAbort: null,
     demoTimer: null,
@@ -253,7 +262,7 @@
     els.filterHideCards.checked = state.hideCards;
   }
   if (els.filterDue) {
-    els.filterDue.value = "all";
+    els.filterDue.value = "myday";
   }
   if (els.viewSelect) {
     els.viewSelect.value = state.view;
@@ -341,10 +350,10 @@
   var VIEW_OPTIONS = {
     list: { label: "List", icon: "view_list" },
     agenda: { label: "Agenda", icon: "view_agenda" },
-    horizon: { label: "Horizon", icon: "stacked_bar_chart" },
+    horizon: { label: "Upcoming by board", icon: "stacked_bar_chart" },
     workload: { label: "Workload", icon: "group" },
-    progress: { label: "Card progress", icon: "donut_large" },
-    gantt: { label: "Gantt", icon: "view_timeline" },
+    progress: { label: "Checklist progress", icon: "donut_large" },
+    gantt: { label: "Timeline", icon: "view_timeline" },
     calendar: { label: "Calendar", icon: "calendar_month" },
   };
 
@@ -408,6 +417,9 @@
     }
     if (els.themeToggleLabel) {
       els.themeToggleLabel.textContent = dark ? "Light mode" : "Dark mode";
+    }
+    if (els.brandMark) {
+      els.brandMark.src = dark ? "./icons/hub-light.svg" : "./icons/hub-dark.svg";
     }
     if (els.themeToggleGroup) {
       els.themeToggleGroup
@@ -498,7 +510,7 @@
   function initFooterMeta() {
     if (els.footerVersion) {
       els.footerVersion.textContent =
-        "v" + ((config && config.appVersion) || "1.0.1");
+        "v" + ((config && config.appVersion) || "1.1.0");
     }
     var email = (config && config.supportEmail) || "";
     var url = (config && config.supportUrl) || "";
@@ -650,8 +662,23 @@
     });
   }
 
+  function handleAuthorizationError(err) {
+    if (!err || (err.status !== 401 && err.status !== 403)) return false;
+    state.token = null;
+    state.data = null;
+    if (api && api.clearCache) api.clearCache();
+    setUiAuthorized(false);
+    els.subtitle.textContent = "Trello access expired · authorize again";
+    showBanner(
+      "Your Trello access has expired or was revoked. Authorize again to continue.",
+      "warn",
+      { dismissible: false }
+    );
+    return true;
+  }
+
   /**
-   * Why Load boards cannot start right now (or null if it can).
+   * Why the initial board scan cannot start right now (or null if it can).
    * Covers boards, auth, in-flight work, and config — not post-load filters.
    */
   function getLoadChecklistsBlocker() {
@@ -664,21 +691,21 @@
     }
     if (!state.demo && !state.token) {
       return {
-        message: "Authorize with Trello before you Load boards.",
+        message: "Authorize with Trello before you view checklists.",
         openFilters: false,
       };
     }
     if (!state.demo && !isApiKeyConfigured()) {
       return {
         message:
-          "API key is not set in config.js, so Load boards cannot talk to Trello.",
+          "API key is not set in config.js, so Checklist Hub cannot talk to Trello.",
         openFilters: false,
       };
     }
     if (!state.boardsReady) {
       return {
         message:
-          "Board names are still loading. Wait a moment, then tick boards under Filters → Boards and press Load boards.",
+          "Board names are still loading. Wait a moment, then select boards under Filters and view checklists.",
         openFilters: true,
       };
     }
@@ -698,7 +725,7 @@
       return {
         title: "No boards selected",
         message:
-          "Load boards has nothing to pull. Tick at least one board under Filters → Boards, then try again.",
+          "Select at least one board under Filters, then try again.",
         openFilters: true,
         modal: true,
       };
@@ -761,12 +788,16 @@
     return d;
   }
 
-  /** Next Mon–Fri after `from` (skips Sat/Sun). Friday → Monday. */
-  function nextWeekday(from) {
+  /** The next calendar day. "Tomorrow" must never silently skip weekends. */
+  function nextCalendarDay(from) {
+    if (
+      window.ChecklistHubDates &&
+      typeof window.ChecklistHubDates.nextCalendarDay === "function"
+    ) {
+      return window.ChecklistHubDates.nextCalendarDay(from);
+    }
     var d = startOfDay(from || new Date());
-    do {
-      d = new Date(d.getTime() + 24 * 60 * 60 * 1000);
-    } while (d.getDay() === 0 || d.getDay() === 6);
+    d.setDate(d.getDate() + 1);
     return d;
   }
 
@@ -809,7 +840,7 @@
       var leadBit;
       if (ts <= endToday) leadBit = "Reminded today";
       else {
-        var nextWork = nextWeekday(now);
+        var nextWork = nextCalendarDay(now);
         var nextStart = startOfDay(nextWork).getTime();
         var nextEnd = endOfDay(nextWork).getTime();
         if (ts >= nextStart && ts <= nextEnd) leadBit = "Reminded tomorrow";
@@ -836,7 +867,7 @@
       return hasTime ? "Overdue " + time : "Overdue today";
     }
     if (ts <= endToday) return hasTime ? "Today " + time : "Today";
-    var nextWorkday = nextWeekday(now);
+    var nextWorkday = nextCalendarDay(now);
     var nextStartTs = startOfDay(nextWorkday).getTime();
     var nextEndTs = endOfDay(nextWorkday).getTime();
     if (ts >= nextStartTs && ts <= nextEndTs) {
@@ -920,15 +951,16 @@
    * Calendar: anytime Show is on. List: only when time-framed;
    * individual rows are further limited to today/tomorrow lead days.
    */
-  function remindersVisible() {
+  function remindersVisibleFor(filters) {
     if (!remindersEnabled()) return false;
-    if (state.view === "calendar" || state.view === "agenda") {
-      return true;
-    }
+    if (filters.view === "calendar" || filters.view === "agenda") return true;
     if (state.groupBy === "due") return true;
     if (state.groupBy === "none" && state.sortKey === "due") return true;
-    var due = els.filterDue ? els.filterDue.value : "all";
-    return due === "myday" || due === "today" || due === "tomorrow";
+    return (
+      filters.due === "myday" ||
+      filters.due === "today" ||
+      filters.due === "tomorrow"
+    );
   }
 
   /** List reminders only land in Due today / Due tomorrow (not week/later). */
@@ -1004,6 +1036,23 @@
     return ids;
   }
 
+  function captureFilterState(overrides) {
+    var helper = window.ChecklistHubFilterState;
+    var snapshot = helper.capture({
+      people: selectedPeopleIds(),
+      boardRoot: els.filterBoard,
+      labelRoot: els.filterLabel,
+      listRoot: els.filterList,
+      dueInput: els.filterDue,
+      searchInput: els.filterSearch,
+      hideCompleted: state.hideCompleted,
+      hideCards: state.hideCards,
+      view: state.view,
+      bypassDue: state.bypassDue,
+    });
+    return Object.assign(snapshot, overrides || {});
+  }
+
   function isViewerOnlyAssignees() {
     var people = selectedPeopleIds();
     var meId = viewerMemberId();
@@ -1067,13 +1116,17 @@
   }
 
   function updateAssigneeSummary() {
-    updateMultiSummary(els.filterAssignee, "Anyone", "Anyone");
+    updateMultiSummary(
+      els.filterAssignee,
+      "All assigned people",
+      "All assigned people"
+    );
   }
 
-  function filterAssigneeOptions(query) {
-    if (!els.filterAssignee) return;
+  function filterMultiOptions(root, query) {
+    if (!root) return;
     var q = String(query || "").trim().toLowerCase();
-    els.filterAssignee.querySelectorAll(".multi-option").forEach(function (row) {
+    root.querySelectorAll(".multi-option").forEach(function (row) {
       var label = (
         (row.querySelector("input") &&
           row.querySelector("input").getAttribute("data-label")) ||
@@ -1082,6 +1135,10 @@
       ).toLowerCase();
       row.hidden = Boolean(q) && label.indexOf(q) === -1;
     });
+  }
+
+  function filterAssigneeOptions(query) {
+    filterMultiOptions(els.filterAssignee, query);
   }
 
   function addOption(container, value, label, checked) {
@@ -1345,20 +1402,19 @@
     return items.concat(memberCards);
   }
 
-  function matchesFilters(item) {
+  function matchesFilters(item, filterState) {
+    var filters = filterState || captureFilterState();
     if (isReminderRow(item)) {
-      if (!remindersVisible()) return false;
+      if (!remindersVisibleFor(filters)) return false;
       if (!reminderAllowedInList(item)) return false;
     }
 
-    var people = selectedPeopleIds();
-    var boards = getCheckedValues(els.filterBoard);
-    var due = els.filterDue.value;
-    var q = (els.filterSearch.value || "").trim().toLowerCase();
+    var people = filters.people;
+    var boards = filters.boards;
+    var due = filters.due;
+    var q = filters.search;
     var rowState = itemState(item);
-    var boardOptionCount = els.filterBoard
-      ? els.filterBoard.querySelectorAll('input[type="checkbox"]').length
-      : 0;
+    var boardOptionCount = filters.boardOptionCount;
 
     if (!people.length) {
       // Anyone: assigned work only — no org-wide unassigned dump.
@@ -1381,12 +1437,16 @@
       if (boards.indexOf(item.boardId) === -1) return false;
     }
 
-    if (state.hideCompleted && viewUsesHideCompleted(state.view) && rowState !== "incomplete") {
+    if (
+      filters.hideCompleted &&
+      viewUsesHideCompleted(filters.view) &&
+      rowState !== "incomplete"
+    ) {
       return false;
     }
-    if (state.hideCards && isCardWork(item)) return false;
+    if (filters.hideCards && isCardWork(item)) return false;
 
-    var labels = els.filterLabel ? getCheckedValues(els.filterLabel) : [];
+    var labels = filters.labels;
     if (labels.length) {
       var itemLabelIds = (item.labels || []).map(function (l) {
         return l.id;
@@ -1397,11 +1457,11 @@
       if (!labelHit) return false;
     }
 
-    var lists = els.filterList ? getCheckedValues(els.filterList) : [];
+    var lists = filters.lists;
     if (lists.length && lists.indexOf(item.listId) === -1) return false;
 
     // Views that own their time axis ignore due chips so they are not hollowed out.
-    if (!state.bypassDue && due !== "all" && !viewOwnsTime(state.view)) {
+    if (!filters.bypassDue && due !== "all" && !viewOwnsTime(filters.view)) {
       var dueTs = item.due ? new Date(item.due).getTime() : null;
       var now = new Date();
       if (due === "none" && dueTs) return false;
@@ -1412,6 +1472,15 @@
         var isOverdue = dueTs < now.getTime();
         var isToday = dueTs >= dayStart && dueTs <= dayEnd;
         if (!isOverdue && !isToday) return false;
+      }
+      if (due === "upcoming") {
+        if (
+          !dueTs ||
+          rowState === "complete" ||
+          dueTs <= endOfDay(now).getTime()
+        ) {
+          return false;
+        }
       }
       if (due === "overdue") {
         if (
@@ -1433,7 +1502,7 @@
         }
       }
       if (due === "tomorrow") {
-        var nextDay = nextWeekday(now);
+        var nextDay = nextCalendarDay(now);
         var tomorrowStart = startOfDay(nextDay).getTime();
         var tomorrowEndDue = endOfDay(nextDay).getTime();
         if (!dueTs || dueTs < tomorrowStart || dueTs > tomorrowEndDue) {
@@ -1441,8 +1510,8 @@
         }
       }
       if (due === "week") {
-        // After today, within 7 days, excluding the next-weekday "Tomorrow" day.
-        var nextDay = nextWeekday(now);
+        // After today, within 7 days, excluding tomorrow.
+        var nextDay = nextCalendarDay(now);
         var nextStart = startOfDay(nextDay).getTime();
         var nextEnd = endOfDay(nextDay).getTime();
         var todayEnd = endOfDay(now).getTime();
@@ -1519,7 +1588,7 @@
         var search = panel.querySelector(".multi-select-search");
         if (search) {
           search.value = "";
-          filterAssigneeOptions("");
+          filterMultiOptions(root, "");
           setTimeout(function () {
             search.focus();
           }, 0);
@@ -1615,7 +1684,7 @@
     if (ts <= endOfDay(now).getTime()) {
       return { id: "today", label: "Due today", order: 1 };
     }
-    var nextWorkday = nextWeekday(now);
+    var nextWorkday = nextCalendarDay(now);
     var nextStart = startOfDay(nextWorkday).getTime();
     var nextEnd = endOfDay(nextWorkday).getTime();
     if (ts >= nextStart && ts <= nextEnd) {
@@ -1929,18 +1998,27 @@
     return tr;
   }
 
-  function updateFocusChips() {
+  function updateFocusChips(filterState) {
     if (!els.focusChips) return;
-    var dueValue = els.filterDue.value;
-    els.filterDue.value = "all";
+    var current = filterState || captureFilterState();
+    var dueValue = current.due;
+    var allDates = Object.assign({}, current, { due: "all" });
     var pool = collectRows()
-      .filter(matchesFilters)
+      .filter(function (item) {
+        return matchesFilters(item, allDates);
+      })
       .filter(function (item) {
         return !isReminderRow(item);
       });
-    els.filterDue.value = dueValue;
 
-    var counts = { overdue: 0, today: 0, tomorrow: 0, week: 0, myday: 0 };
+    var counts = {
+      overdue: 0,
+      today: 0,
+      tomorrow: 0,
+      week: 0,
+      myday: 0,
+      upcoming: 0,
+    };
     var now = new Date();
     var dayStart = startOfDay(now).getTime();
     var dayEnd = endOfDay(now).getTime();
@@ -1953,6 +2031,7 @@
       var isOverdue = dueTs < now.getTime();
       var isToday = dueTs >= dayStart && dueTs <= dayEnd;
       if (isOverdue || isToday) counts.myday += 1;
+      if (dueTs > dayEnd) counts.upcoming += 1;
     });
 
     els.focusChips.querySelectorAll("[data-due-chip]").forEach(function (chip) {
@@ -1962,11 +2041,13 @@
       chip.classList.toggle("chip-emphasis", active);
       chip.setAttribute("aria-pressed", active ? "true" : "false");
       if (key === "all") {
-        chip.textContent = "All dates";
+        chip.textContent = "All work";
       } else if (key === "none") {
-        chip.textContent = "Undated queue";
+        chip.textContent = "Undated";
       } else if (key === "myday") {
         chip.textContent = "My day (" + counts.myday + ")";
+      } else if (key === "upcoming") {
+        chip.textContent = "Upcoming (" + counts.upcoming + ")";
       } else if (key === "overdue") {
         chip.textContent = "Overdue (" + counts.overdue + ")";
       } else if (key === "today") {
@@ -2105,7 +2186,6 @@
     syncCalendarModeControls();
     var isWeek = state.calendarMode === "week";
     var todayKey = dateKey(new Date());
-    var maxDayCount = 1;
     var byDay = {};
     var undated = [];
     filtered.forEach(function (item) {
@@ -2116,7 +2196,6 @@
       var key = dateKey(new Date(item.due));
       if (!byDay[key]) byDay[key] = [];
       byDay[key].push(item);
-      if (byDay[key].length > maxDayCount) maxDayCount = byDay[key].length;
     });
 
     var year;
@@ -2219,11 +2298,12 @@
             (daySplit.reminders === 1 ? "" : "s")
           : "");
 
-      cell.setAttribute("role", "button");
-      cell.setAttribute("tabindex", "0");
-      cell.setAttribute("data-day-key", key);
-      cell.setAttribute("aria-expanded", isExpanded ? "true" : "false");
-      cell.setAttribute(
+      var trigger = document.createElement("button");
+      trigger.type = "button";
+      trigger.className = "cal-day-trigger";
+      trigger.setAttribute("data-day-key", key);
+      trigger.setAttribute("aria-expanded", isExpanded ? "true" : "false");
+      trigger.setAttribute(
         "aria-label",
         current.toLocaleDateString(undefined, {
           weekday: "long",
@@ -2251,29 +2331,48 @@
       chevron.className = "cal-day-chevron";
       chevron.setAttribute("aria-hidden", "true");
       heading.appendChild(chevron);
-      cell.appendChild(heading);
+      trigger.appendChild(heading);
+      cell.appendChild(trigger);
 
       if (dayItems.length) {
-        var load = document.createElement("div");
-        load.className = "cal-load";
-        var fill = document.createElement("span");
-        fill.className = "cal-load-fill";
-        var overdueDay = dayItems.filter(function (item) {
-          return dueBucket(item).id === "overdue";
-        }).length;
-        if (overdueDay) fill.classList.add("is-overdue");
-        fill.style.height =
-          Math.max(18, Math.round((dayItems.length / maxDayCount) * 100)) + "%";
-        load.appendChild(fill);
-        var loadLabel = document.createElement("span");
-        loadLabel.className =
-          "cal-load-label" + (overdueDay ? " is-overdue" : "");
-        loadLabel.textContent = countText;
-        load.appendChild(loadLabel);
-        cell.appendChild(load);
+        var previews = document.createElement("div");
+        previews.className = "cal-day-items";
+        dayItems.slice(0, 2).forEach(function (item) {
+          var preview = document.createElement(item.cardUrl ? "a" : "span");
+          preview.className =
+            "cal-item" +
+            (dueBucket(item).id === "overdue" ? " is-overdue" : "") +
+            (itemState(item) === "complete" ? " is-complete" : "");
+          var previewText = document.createElement("span");
+          previewText.className = "cal-item-text";
+          previewText.textContent = item.name || item.cardName || "Untitled";
+          preview.appendChild(previewText);
+          if (preview.tagName === "A") {
+            preview.target = "_blank";
+            preview.rel = "noopener noreferrer";
+            preview.setAttribute(
+              "aria-label",
+              "Open " + previewText.textContent + " in Trello"
+            );
+            if (!applySafeHref(preview, item.cardUrl)) {
+              preview.removeAttribute("href");
+            }
+            preview.addEventListener("click", function (event) {
+              event.stopPropagation();
+            });
+          }
+          previews.appendChild(preview);
+        });
+        if (dayItems.length > 2) {
+          var more = document.createElement("span");
+          more.className = "cal-more";
+          more.textContent = "+" + (dayItems.length - 2) + " more";
+          previews.appendChild(more);
+        }
+        cell.appendChild(previews);
       }
 
-      cell.addEventListener(
+      trigger.addEventListener(
         "click",
         (function (dayKey) {
           return function () {
@@ -2284,7 +2383,7 @@
           };
         })(key)
       );
-      cell.addEventListener(
+      trigger.addEventListener(
         "keydown",
         (function (dayKey) {
           return function (event) {
@@ -2455,7 +2554,12 @@
         stats.lists += 1;
       }
     });
-    var filtered = allRows.filter(matchesFilters).sort(compareItems);
+    var filterState = captureFilterState();
+    var filtered = allRows
+      .filter(function (item) {
+        return matchesFilters(item, filterState);
+      })
+      .sort(compareItems);
     state.visibleItems = filtered;
 
     var counted = filtered.filter(function (item) {
@@ -2486,7 +2590,7 @@
       realLoaded +
       " total loaded";
 
-    updateFocusChips();
+    updateFocusChips(filterState);
     updateFilterSummary();
     updateScanNudge();
     updateAssigneeVisibilityBanner();
@@ -2517,14 +2621,15 @@
 
     els.calendarWrap.hidden = true;
     if (els.insightWrap) els.insightWrap.hidden = true;
-    setTableVisible(true);
     els.emptyState.hidden = !filtered.length ? false : true;
     els.itemsBody.innerHTML = "";
 
     if (!filtered.length) {
+      setTableVisible(false);
       setEmptyCopy("filtered");
       return;
     }
+    setTableVisible(true);
 
     var frag = document.createDocumentFragment();
     var groups = buildGroups(filtered);
@@ -2811,7 +2916,7 @@
     els.welcomeStarter.innerHTML = "";
     var none = document.createElement("option");
     none.value = "";
-    none.textContent = "None — tick boards yourself";
+    none.textContent = "None — select boards yourself";
     els.welcomeStarter.appendChild(none);
 
     if (teams.length) {
@@ -2872,13 +2977,13 @@
       ".material-symbols-outlined"
     );
     if (parsed.kind === "team") {
-      if (label) label.textContent = "Load team checklists";
+      if (label) label.textContent = "View this team's work";
       if (icon) icon.textContent = "group";
     } else if (parsed.kind === "view") {
-      if (label) label.textContent = "Load with this view";
+      if (label) label.textContent = "Start with this view";
       if (icon) icon.textContent = "bookmark";
     } else {
-      if (label) label.textContent = "Load boards";
+      if (label) label.textContent = "View checklists";
       if (icon) icon.textContent = "radar";
     }
   }
@@ -3065,29 +3170,51 @@
   }
 
   function setConfigOpen(open) {
-    state.filtersOpen = Boolean(open);
-    savePrefs({ filtersOpen: state.filtersOpen });
-    if (els.configPanel) {
-      els.configPanel.hidden = !state.filtersOpen;
+    var next = Boolean(open);
+    if (!els.configPanel) {
+      state.filtersOpen = next;
+      return;
     }
-    if (els.configToggle) {
-      els.configToggle.setAttribute(
-        "aria-expanded",
-        state.filtersOpen ? "true" : "false"
-      );
-      els.configToggle.classList.toggle("is-active", state.filtersOpen);
-      var label = els.configToggle.querySelector(".btn-label");
-      if (label) {
-        label.textContent = state.filtersOpen ? "Hide filters" : "Filters";
+    if (next) {
+      if (state.filtersOpen && !els.configPanel.hidden) return;
+      state.filtersOpen = true;
+      closeWelcomeModal({ skipSession: true });
+      closeScanConfirm();
+      closeLoadBlockedModal();
+      closePrivacyModal();
+      closeApiUsageModal();
+      closeGanttChecklistModal();
+      closeShortcutsModal();
+      closeSyncMenu();
+      closeViewMenu();
+      if (els.configToggle) {
+        els.configToggle.setAttribute("aria-expanded", "true");
+        els.configToggle.classList.add("is-active");
       }
+      openModalShell(
+        els.configPanel,
+        els.configClose || els.configDone
+      );
+      return;
     }
-    document.body.classList.toggle("config-open", state.filtersOpen);
+    if (!state.filtersOpen && els.configPanel.hidden) return;
+    state.filtersOpen = false;
+    els.configPanel.hidden = true;
+    if (els.configToggle) {
+      els.configToggle.setAttribute("aria-expanded", "false");
+      els.configToggle.classList.remove("is-active");
+    }
+    if (noOtherModalOpen()) {
+      document.body.classList.remove("welcome-open");
+      restoreModalFocus();
+    }
   }
 
   function updateFilterSummary() {
     if (!els.filterSummary) return;
+    var filters = captureFilterState();
     var bits = [];
-    bits.push(state.hideCards ? "Tasks" : "Tasks + cards");
+    bits.push(state.hideCards ? "Tasks" : "Tasks + member-only cards");
 
     var assignees = getCheckedValues(els.filterAssignee);
     if (assignees.length === 1 && assignees[0] === "me") bits.push("Me");
@@ -3099,21 +3226,20 @@
     if (state.showReminders && viewUsesReminders(state.view)) {
       bits.push("Reminders");
     }
-    if (els.filterDue.value !== "all" && !viewOwnsTime(state.view)) {
+    if (filters.due !== "all" && !viewOwnsTime(state.view)) {
       var dueLabels = {
         myday: "My day",
+        upcoming: "Upcoming",
         overdue: "Overdue",
         today: "Today",
         tomorrow: "Tomorrow",
         week: "7 days",
         none: "Undated",
       };
-      bits.push(dueLabels[els.filterDue.value] || els.filterDue.value);
+      bits.push(dueLabels[filters.due] || filters.due);
     }
-    var boards = getCheckedValues(els.filterBoard);
-    var boardBoxes = els.filterBoard
-      ? els.filterBoard.querySelectorAll('input[type="checkbox"]').length
-      : 0;
+    var boards = filters.boards;
+    var boardBoxes = filters.boardOptionCount;
     if (boardBoxes) {
       if (!boards.length) bits.push("No boards shown");
       else if (boards.length < boardBoxes) {
@@ -3121,14 +3247,14 @@
       }
     }
     if (els.filterLabel) {
-      var labelIds = getCheckedValues(els.filterLabel);
+      var labelIds = filters.labels;
       if (labelIds.length) bits.push(labelIds.length + " labels");
     }
     if (els.filterList) {
-      var listIds = getCheckedValues(els.filterList);
+      var listIds = filters.lists;
       if (listIds.length) bits.push(listIds.length + " lists");
     }
-    var q = (els.filterSearch.value || "").trim();
+    var q = filters.search;
     if (q) bits.push('“' + q.slice(0, 18) + (q.length > 18 ? "…" : "") + '”');
 
     els.filterSummary.textContent = bits.join(" · ");
@@ -3136,6 +3262,7 @@
 
   function setUiAuthorized(isAuthorized) {
     els.authBtn.hidden = isAuthorized;
+    if (els.authEmptyState) els.authEmptyState.hidden = isAuthorized;
     if (els.disconnectBtn) {
       els.disconnectBtn.hidden = !isAuthorized || state.demo;
     }
@@ -3148,10 +3275,8 @@
     if (els.metaRow) els.metaRow.hidden = !isAuthorized;
     if (els.viewToggle) els.viewToggle.hidden = !isAuthorized;
     if (els.stageBar) els.stageBar.hidden = !isAuthorized;
-    if (els.configPanel) {
-      els.configPanel.hidden = !(isAuthorized && state.filtersOpen);
-    }
     if (!isAuthorized) {
+      setConfigOpen(false);
       if (els.calendarWrap) els.calendarWrap.hidden = true;
       if (els.insightWrap) els.insightWrap.hidden = true;
       if (els.insightWrap) els.insightWrap.hidden = true;
@@ -3162,7 +3287,6 @@
       closeViewMenu();
     } else {
       populateSavedViews();
-      setConfigOpen(state.filtersOpen);
       if (state.data) startStatusNudgeWatch();
       else stopStatusNudgeWatch();
       updateAllowlistSummary();
@@ -3187,22 +3311,22 @@
       els.refreshBtn.disabled = !ready || hasData;
       var label = els.refreshBtn.querySelector(".btn-label");
       var icon = els.refreshBtn.querySelector(".material-symbols-outlined");
-      if (label) label.textContent = "Load boards";
+      if (label) label.textContent = "View checklists";
       if (icon) icon.textContent = "radar";
       els.refreshBtn.title =
-        "Load items from the boards ticked under Filters → Boards";
+        "Collect checklist work from the selected boards";
     }
 
     if (els.syncActions) {
-      // Split Update status + menu — after the first scan.
+      // One Refresh action with a full-rescan option after the first scan.
       els.syncActions.hidden = !ready || !hasData;
     }
 
     if (els.statusBtn) {
       els.statusBtn.disabled = !ready || !hasData;
       els.statusBtn.title = hasData
-        ? "Refresh open/complete state for items already loaded"
-        : "Load boards first, then Update status can refresh known items";
+        ? "Refresh current work and add any newly selected boards"
+        : "View checklists first, then Refresh can check current items";
     }
 
     if (els.syncMenuBtn) {
@@ -3232,11 +3356,11 @@
     if (!state.boardsReady && !opts.forceFull && !opts.boardListOnly) {
       return loadBoardList().then(function () {
         showBanner(
-          "Board list ready. Tick boards under Filters → Boards, then press Load boards again.",
+          "Board list ready. Select boards under Filters, then choose View checklists.",
           "info",
           { dismissible: true, bannerKind: "board-pick" }
         );
-        setConfigOpen(true);
+        if (!getAllowlistBoardIds().length) setConfigOpen(true);
       });
     }
     if (opts.boardListOnly) {
@@ -3303,11 +3427,11 @@
       if (els.emptyState) els.emptyState.hidden = false;
       if (!opts.silent) {
         showBanner(
-          "Tick boards under Filters → Boards, then press Load boards.",
+          "Select boards under Filters, then choose View checklists.",
           "info",
           { dismissible: true, bannerKind: "board-pick" }
         );
-        setConfigOpen(true);
+        if (!getAllowlistBoardIds().length) setConfigOpen(true);
       }
     }
     if (els.cacheNote && !state.data) {
@@ -3320,7 +3444,7 @@
     }
     if (els.subtitle && !state.data) {
       els.subtitle.textContent =
-        "Choose boards, then Load boards" +
+        "Choose boards, then view checklists" +
         (catalog.me && (catalog.me.fullName || catalog.me.username)
           ? " · " + (catalog.me.fullName || catalog.me.username)
           : "");
@@ -3420,7 +3544,7 @@
           setScanProgress(1, 1, "Done", "catalog");
           if (listOpts.refreshOnly && state.data) {
             showBanner(
-              "Board name list refreshed. Checklist data is unchanged until you Load boards.",
+              "Board names refreshed. Your work is unchanged until you rescan selected boards.",
               "info",
               { dismissible: true, bannerKind: "board-pick" }
             );
@@ -3477,16 +3601,16 @@
       var missingCount = missing.length;
       showBanner(
         missingCount +
-          (missingCount === 1 ? " ticked board is" : " ticked boards are") +
+          (missingCount === 1 ? " selected board is" : " selected boards are") +
           " not loaded yet.",
         "info",
         {
           dismissible: true,
           bannerKind: "allowlist-rescan",
           actionLabel:
-            missingCount === 1 ? "Load that board" : "Load those boards",
+            missingCount === 1 ? "Add that board" : "Add those boards",
           action: function () {
-            runScan({ skipConfirm: true, forceFull: true });
+            loadMissingBoards();
           },
         }
       );
@@ -3598,10 +3722,10 @@
     if (state.allowlistRescanNeeded && state.data) {
       var missing = boardsMissingFromScan().length;
       var label =
-        missing === 1 ? "Load added board" : "Load " + missing + " added boards";
+        missing === 1 ? "Add selected board" : "Add " + missing + " selected boards";
       setScanNudge(
         label,
-        "These boards are ticked, but their checklist items are not in the list yet."
+        "These boards are selected, but their checklist items are not here yet."
       );
       return;
     }
@@ -3609,14 +3733,14 @@
       els.scanNudge.hidden = true;
       return;
     }
-    var ttl = (config && config.cacheTtlMs) || 5 * 60 * 1000;
-    var nudgeAfter = Math.max(ttl, 15 * 60 * 1000);
+    var nudgeAfter =
+      (config && config.rescanNudgeMs) || 15 * 60 * 1000;
     var age = Date.now() - state.data.fetchedAt;
     els.scanNudge.hidden = age < nudgeAfter;
     if (!els.scanNudge.hidden) {
       setScanNudge(
         "Check for new tasks",
-        "Look again for work assigned since the last load. Update status only refreshes items already here."
+        "Rescan selected boards for work assigned since the last refresh."
       );
     }
   }
@@ -3629,7 +3753,9 @@
     if (mode === "pick-boards") {
       var ticked = getAllowlistBoardIds().length;
       if (heading) {
-        heading.textContent = ticked ? "Load these boards" : "Choose boards to load";
+        heading.textContent = ticked
+          ? "Start with these boards"
+          : "Choose your boards";
       }
       if (steps) steps.hidden = true;
       if (note) {
@@ -3638,8 +3764,8 @@
           ? ticked +
             " board" +
             (ticked === 1 ? " is" : "s are") +
-            " ticked. Press Load boards to pull checklist items. Closing the hub clears that data."
-          : "Tick boards under Filters → Boards, then Load boards. Closing the hub clears checklist data.";
+            " selected. Choose View checklists to collect checklist work."
+          : "Select boards under Filters, then choose View checklists.";
       }
     } else if (mode === "idle") {
       if (heading) heading.textContent = "Ready when you are";
@@ -3650,31 +3776,43 @@
           if (state.demo) {
             items[0].textContent = "Demo mode — no Trello authorize needed.";
             items[1].textContent =
-              "Boards list automatically. Tick the ones you need (a team preselects them).";
+              "Boards list automatically. Select the ones you need.";
             items[2].textContent =
-              "Load boards — then explore filters and views with sample data.";
+              "View checklists — then explore the sample work.";
           } else {
             items[0].textContent = "Authorize once (read-only).";
             items[1].textContent =
-              "Boards list automatically. Tick the ones you need (a team preselects them).";
+              "Boards list automatically. Select the ones you need.";
             items[2].textContent =
-              "Load boards — then open cards in Trello to finish work.";
+              "View checklists — then open cards in Trello to finish work.";
           }
         }
       }
       if (note) {
         note.hidden = false;
         note.textContent = state.demo
-          ? "Pick a Quick start team or tick boards, then Load boards. Sample data only."
-          : "Boards are listed when you open the hub. Tick the ones you need, then Load boards. Day to day, prefer Update status.";
+          ? "Pick a Quick start team or select boards, then view checklists."
+          : "Select the boards that contribute to your work, then view checklists.";
       }
     } else {
-      if (heading) heading.textContent = "No matching work";
+      var scope = els.filterDue ? els.filterDue.value : "all";
+      if (heading) {
+        heading.textContent =
+          scope === "myday"
+            ? "Your day is clear"
+            : scope === "upcoming"
+              ? "No upcoming work"
+              : scope === "none"
+                ? "No undated work"
+                : "No matching work";
+      }
       if (steps) steps.hidden = true;
       if (note) {
         note.hidden = false;
         note.textContent =
-          "Try My day, widen filters, open Undated, or Load boards again.";
+          scope === "myday"
+            ? "Review Upcoming or Undated work, or rescan selected boards."
+            : "Try another due filter, widen filters, or rescan selected boards.";
       }
     }
   }
@@ -3702,9 +3840,10 @@
         chip.classList.toggle("is-active", active);
         chip.classList.toggle("chip-emphasis", active);
         chip.setAttribute("aria-pressed", active ? "true" : "false");
-        if (key === "all") chip.textContent = "All dates";
+        if (key === "all") chip.textContent = "All work";
         else if (key === "myday") chip.textContent = "My day";
-        else if (key === "none") chip.textContent = "Undated queue";
+        else if (key === "upcoming") chip.textContent = "Upcoming";
+        else if (key === "none") chip.textContent = "Undated";
         else if (key === "overdue") chip.textContent = "Overdue";
         else if (key === "today") chip.textContent = "Today";
         else if (key === "tomorrow") chip.textContent = "Tomorrow";
@@ -3729,6 +3868,7 @@
   }
 
   function activeModal() {
+    if (els.configPanel && !els.configPanel.hidden) return els.configPanel;
     if (els.welcomeModal && !els.welcomeModal.hidden) return els.welcomeModal;
     if (els.scanConfirmModal && !els.scanConfirmModal.hidden) {
       return els.scanConfirmModal;
@@ -3740,6 +3880,9 @@
       return els.ganttChecklistModal;
     }
     if (els.privacyModal && !els.privacyModal.hidden) return els.privacyModal;
+    if (els.shortcutsModal && !els.shortcutsModal.hidden) {
+      return els.shortcutsModal;
+    }
     if (els.apiUsageModal && !els.apiUsageModal.hidden) return els.apiUsageModal;
     return null;
   }
@@ -3809,6 +3952,7 @@
     closePrivacyModal();
     closeApiUsageModal();
     closeGanttChecklistModal();
+    setConfigOpen(false);
     syncWelcomeTeamsUi();
     populateWelcomeStarter();
     var focusEl =
@@ -3844,6 +3988,7 @@
     closeApiUsageModal();
     closeLoadBlockedModal();
     closeGanttChecklistModal();
+    setConfigOpen(false);
     openModalShell(els.scanConfirmModal, els.scanConfirmOk);
   }
 
@@ -3869,6 +4014,7 @@
     closePrivacyModal();
     closeApiUsageModal();
     closeGanttChecklistModal();
+    setConfigOpen(false);
     if (els.loadBlockedTitle) {
       els.loadBlockedTitle.textContent = blocker.title || "Can't load boards";
     }
@@ -3896,6 +4042,7 @@
     closeLoadBlockedModal();
     closeApiUsageModal();
     closeGanttChecklistModal();
+    setConfigOpen(false);
     openModalShell(
       els.privacyModal,
       els.privacyModalClose ||
@@ -3905,6 +4052,26 @@
 
   function closePrivacyModal() {
     if (els.privacyModal) els.privacyModal.hidden = true;
+    if (noOtherModalOpen()) {
+      document.body.classList.remove("welcome-open");
+      restoreModalFocus();
+    }
+  }
+
+  function openShortcutsModal() {
+    if (!els.shortcutsModal) return;
+    closePrivacyModal();
+    closeApiUsageModal();
+    setConfigOpen(false);
+    openModalShell(
+      els.shortcutsModal,
+      els.shortcutsModalClose ||
+        els.shortcutsModal.querySelector(".welcome-dialog button")
+    );
+  }
+
+  function closeShortcutsModal() {
+    if (els.shortcutsModal) els.shortcutsModal.hidden = true;
     if (noOtherModalOpen()) {
       document.body.classList.remove("welcome-open");
       restoreModalFocus();
@@ -4044,7 +4211,7 @@
       if (els.insightWrap) els.insightWrap.hidden = true;
           els.emptyState.hidden = true;
           showBanner(
-            "Authorize once with Trello (read-only). Boards list next — tick what you need, then Load boards.",
+            "Authorize once with Trello (read-only). Then select the boards that contribute to your work.",
             "info"
           );
           return null;
@@ -4109,6 +4276,14 @@
         "info",
         {
           dismissible: true,
+          actionLabel: "Retry affected boards",
+          action: function () {
+            loadMissingBoards(
+              data.meta.boardErrors.map(function (err) {
+                return err.boardId;
+              })
+            );
+          },
           technical:
             "Board issues:\n" +
             data.meta.boardErrors
@@ -4125,7 +4300,7 @@
         }
       );
     }
-    // Rate / HTTP detail stays in Request activity modal — not the main cache note.
+    // Rate / HTTP detail stays in API usage — not the main cache note.
     if (!opts.keepSubtitle) {
       els.subtitle.textContent =
         opts.subtitle ||
@@ -4166,7 +4341,7 @@
     });
     state.data.statusSyncedAt = Date.now();
     els.cacheNote.textContent =
-      "Status updated · " +
+      "Refreshed · " +
       changed +
       " item(s) changed locally (demo)";
     renderTable();
@@ -4178,7 +4353,7 @@
     if (!state.data) {
       if (!silent) {
         showBanner(
-          "Load boards first. Update status then refreshes what you already have.",
+          "View checklists first. Refresh then checks the work already here.",
           "info",
           { dismissible: true }
         );
@@ -4200,7 +4375,7 @@
 
     if (state.demo) {
       if (!silent) {
-        els.subtitle.textContent = "Updating known items…";
+        els.subtitle.textContent = "Refreshing current work…";
       }
       if (state.scanAbort) {
         try {
@@ -4220,11 +4395,7 @@
         .then(function () {
           if (!silent) {
             els.subtitle.textContent = "Demo user · Alex Rivera";
-            showBanner(
-              "Status update only refreshes items already in the list — it does not find brand-new checklist assignments or member cards.",
-              "info",
-              { dismissible: true }
-            );
+            showBanner(null);
           }
         })
         .catch(function (err) {
@@ -4253,7 +4424,7 @@
         if (!token) return null;
         state.token = token;
         if (!silent) {
-          els.subtitle.textContent = "Updating open work…";
+          els.subtitle.textContent = "Refreshing current work…";
           setScanProgress(0, 1, "Starting…", "update");
         }
         return api.refreshKnownStatus(state.token, state.data, {
@@ -4271,10 +4442,10 @@
       .then(function (result) {
         if (!result) return;
         var meta = result.meta || {};
-        var note = "Status updated";
+        var note = "Refreshed";
         if (meta.updated != null) {
           note =
-            "Status updated · checked " +
+            "Refreshed · checked " +
             (meta.checked || 0) +
             " · changed " +
             (meta.updated || 0) +
@@ -4290,11 +4461,7 @@
         });
 
         if (!silent) {
-          showBanner(
-            "Updated statuses for items already in this list. Load boards to pick up brand-new work.",
-            "info",
-            { dismissible: true }
-          );
+          showBanner(null);
         }
       })
       .catch(function (err) {
@@ -4309,10 +4476,88 @@
           }
           return;
         }
+        if (handleAuthorizationError(err)) return;
         if (!silent) {
-          showErrorBanner(err, "Update status");
-          els.subtitle.textContent = "Status update failed";
+          showErrorBanner(err, "Refresh current work");
+          els.subtitle.textContent = "Refresh failed";
         }
+      })
+      .finally(finish);
+  }
+
+  function loadMissingBoards(boardIds) {
+    var missing =
+      Array.isArray(boardIds) && boardIds.length
+        ? boardIds.slice()
+        : boardsMissingFromScan();
+    if (!state.data || !missing.length) return Promise.resolve();
+    if (state.demo) {
+      return runScan({ skipConfirm: true, forceFull: true });
+    }
+    if (state.loading) return Promise.resolve();
+
+    state.loading = true;
+    syncActionButtons();
+    closeSyncMenu();
+    clearNonPrivacyBanner();
+    state.scanAbort =
+      typeof AbortController !== "undefined" ? new AbortController() : null;
+    var loadAbort = state.scanAbort;
+    setScanProgress(0, missing.length, "Selected boards");
+    els.subtitle.textContent = "Adding selected boards…";
+
+    var finish = function () {
+      if (state.scanAbort !== loadAbort) return;
+      state.loading = false;
+      state.scanAbort = null;
+      hideScanProgress();
+      syncActionButtons();
+      updateScanNudge();
+    };
+
+    return ensureAuthorized()
+      .then(function (token) {
+        if (!token) return null;
+        state.token = token;
+        return api.loadAdditionalBoards(
+          token,
+          state.data,
+          missing,
+          {
+            signal: loadAbort ? loadAbort.signal : null,
+            onProgress: function (done, total, boardName) {
+              els.subtitle.textContent =
+                "Adding boards " + done + "/" + total + " · " + boardName;
+              setScanProgress(done, total, boardName);
+            },
+          }
+        );
+      })
+      .then(function (result) {
+        if (!result) return;
+        applyDataset(result.data, {
+          cacheNote:
+            "Added " +
+            missing.length +
+            " board" +
+            (missing.length === 1 ? "" : "s"),
+        });
+        state.allowlistRescanNeeded = false;
+        showBanner(
+          missing.length === 1
+            ? "Selected board added."
+            : "Selected boards added.",
+          "info",
+          { dismissible: true }
+        );
+      })
+      .catch(function (err) {
+        if (err && err.name === "AbortError") {
+          showBanner("Refresh cancelled.", "info", { dismissible: true });
+          return;
+        }
+        if (handleAuthorizationError(err)) return;
+        showErrorBanner(err, "Add selected boards");
       })
       .finally(finish);
   }
@@ -4421,7 +4666,7 @@
             showBanner("Cancelled.", "info", { dismissible: true });
             els.subtitle.textContent = state.data
               ? "Demo user · Alex Rivera"
-              : "Authorized · tick boards, then Load boards";
+              : "Authorized · select boards, then view checklists";
             return;
           }
           throw err;
@@ -4499,10 +4744,11 @@
               ((state.data.me &&
                 (state.data.me.fullName || state.data.me.username)) ||
                 "member")
-            : "Authorized · tick boards, then Load boards";
+            : "Authorized · select boards, then view checklists";
           return;
         }
-        showErrorBanner(err, "Load boards");
+        if (handleAuthorizationError(err)) return;
+        showErrorBanner(err, "Rescan selected boards");
         els.subtitle.textContent = "Something went wrong";
       })
       .finally(finish);
@@ -4515,7 +4761,9 @@
       (!els.loadBlockedModal || els.loadBlockedModal.hidden) &&
       (!els.ganttChecklistModal || els.ganttChecklistModal.hidden) &&
       (!els.privacyModal || els.privacyModal.hidden) &&
-      (!els.apiUsageModal || els.apiUsageModal.hidden)
+      (!els.shortcutsModal || els.shortcutsModal.hidden) &&
+      (!els.apiUsageModal || els.apiUsageModal.hidden) &&
+      (!els.configPanel || els.configPanel.hidden)
     );
   }
 
@@ -4561,37 +4809,37 @@
     if (els.welcomeLead) {
       if (state.demo && !state.boardsReady) {
         els.welcomeLead.textContent = showStarter
-          ? "Listing boards… Use Quick start for a team, or tick boards yourself."
-          : "Listing sample boards… then tick Boards and Load boards.";
+          ? "Listing boards… Use Quick start for a team, or select boards yourself."
+          : "Listing sample boards… then select the boards you need.";
       } else if (state.demo) {
         els.welcomeLead.textContent = showStarter
-          ? "Use Quick start, or tick Boards yourself, then Load boards. Sample data only."
-          : "Tick boards under Filters → Boards, then Load boards. Sample data only.";
+          ? "Use Quick start, or select boards yourself. Sample data only."
+          : "Select boards under Filters, then view checklists. Sample data only.";
       } else if (!state.boardsReady) {
         if (showStarter) {
           els.welcomeLead.textContent =
-            "Listing boards… Use Quick start for a team or saved view, or tick boards yourself.";
+            "Listing boards… Use Quick start for a team or saved view, or select boards yourself.";
         } else {
           els.welcomeLead.textContent =
-            "Listing available boards… then tick Boards and Load boards.";
+            "Listing available boards… then select the boards you need.";
         }
       } else if (showStarter) {
         els.welcomeLead.textContent =
-          "Use Quick start, or tick Boards yourself, then Load boards.";
+          "Use Quick start, or select boards yourself, then view checklists.";
       } else {
         els.welcomeLead.textContent =
-          "Tick boards under Filters → Boards, then Load boards. Day to day, prefer Update status.";
+          "Select boards under Filters, then view checklists.";
       }
     }
     if (els.welcomeScan) {
-      // Avoid two Load buttons when Quick start already has a primary action.
+      // Avoid two primary buttons when Quick start already has one.
       els.welcomeScan.hidden = showStarter;
       var scanLabel = els.welcomeScan.querySelector(".btn-label");
       var scanIcon = els.welcomeScan.querySelector(".material-symbols-outlined");
-      if (scanLabel) scanLabel.textContent = "Load boards";
+      if (scanLabel) scanLabel.textContent = "View checklists";
       if (scanIcon) scanIcon.textContent = "radar";
       els.welcomeScan.title =
-        "Load items from the boards ticked under Filters → Boards";
+        "Collect checklist work from the selected boards";
     }
     updateWelcomeStarterLoadButton();
   }
@@ -4685,7 +4933,7 @@
           showBanner(
             "Team “" +
               team.name +
-              "” has no default boards. Tick boards under Filters → Boards yourself, then Load boards.",
+              "” has no default boards. Select boards under Filters, then view checklists.",
             "info",
             { dismissible: true, bannerKind: "board-pick" }
           );
@@ -4785,8 +5033,21 @@
         return b.at - a.at;
       });
     var peak = 0;
-    list.forEach(function (b) {
-      if (b.units > peak) peak = b.units;
+    var ordered = events.slice().sort(function (a, b) {
+      return Number(a.at) - Number(b.at);
+    });
+    var windowStart = 0;
+    var rollingUnits = 0;
+    ordered.forEach(function (event, index) {
+      rollingUnits += Number(event.units) || 1;
+      while (
+        windowStart <= index &&
+        Number(event.at) - Number(ordered[windowStart].at) >= 10000
+      ) {
+        rollingUnits -= Number(ordered[windowStart].units) || 1;
+        windowStart += 1;
+      }
+      if (rollingUnits > peak) peak = rollingUnits;
     });
     return {
       totalUnits: totalUnits,
@@ -4861,6 +5122,7 @@
     closeLoadBlockedModal();
     closePrivacyModal();
     closeGanttChecklistModal();
+    setConfigOpen(false);
     renderApiUsageModal();
     openModalShell(
       els.apiUsageModal,
@@ -4913,6 +5175,7 @@
     closeLoadBlockedModal();
     closePrivacyModal();
     closeApiUsageModal();
+    setConfigOpen(false);
 
     var items = resolveGanttChecklistItems(checklist);
     items.sort(function (a, b) {
@@ -4954,7 +5217,7 @@
       if (undated && dated) {
         els.ganttChecklistModalNote.hidden = false;
         els.ganttChecklistModalNote.textContent =
-          "The Gantt bar spans dated items only. Undated items are listed here.";
+          "The timeline spans dated items only. Undated items are listed here.";
       } else if (undated && !dated) {
         els.ganttChecklistModalNote.hidden = false;
         els.ganttChecklistModalNote.textContent =
@@ -5104,13 +5367,15 @@
         "Demo mode — sample data only. Read-only hub: open cards in Trello to complete work.",
         "info"
       );
-      return loadTeamsFromContext().then(function () {
+      showIdleWorkspace();
+      showWelcomeModal();
+      return Promise.all([
+        loadTeamsFromContext(),
+        loadBoardList({ silent: true }),
+      ]).then(function () {
         if (state.teamsContextNote && els.filterTeam) {
           els.filterTeam.title = state.teamsContextNote;
         }
-        showIdleWorkspace();
-        showWelcomeModal();
-        return loadBoardList({ silent: true });
       });
     }
 
@@ -5120,17 +5385,17 @@
         state.token = token;
         els.subtitle.textContent =
           "Authorized · Listing boards…";
-        return loadTeamsFromContext();
-      })
-      .then(function (loaded) {
-        if (!state.token) return;
-        if (state.teamsContextNote) {
-          els.subtitle.textContent =
-            "Authorized · " + state.teamsContextNote;
-        }
         showIdleWorkspace();
         showWelcomeModal();
-        return loadBoardList({ silent: true });
+        return Promise.all([
+          loadTeamsFromContext(),
+          loadBoardList({ silent: true }),
+        ]).then(function () {
+          if (state.teamsContextNote && !state.data) {
+            els.subtitle.textContent =
+              "Authorized · " + state.teamsContextNote;
+          }
+        });
       });
   }
 
@@ -5140,6 +5405,10 @@
 
   if (els.statusBtn) {
     els.statusBtn.addEventListener("click", function () {
+      if (boardsMissingFromScan().length) {
+        loadMissingBoards();
+        return;
+      }
       loadStatus(false);
     });
   }
@@ -5176,16 +5445,16 @@
     if (!document.hidden) updateStatusNudge();
   });
 
-  els.authBtn.addEventListener("click", function () {
+  function authorizeHub() {
     if (state.demo) {
       setUiAuthorized(true);
       state.token = "demo-token";
       els.subtitle.textContent = "Demo user · Alex Rivera";
       showIdleWorkspace();
       showWelcomeModal(true);
-      return;
+      return Promise.resolve();
     }
-    getRestApiClient()
+    return getRestApiClient()
       .then(function (rest) {
         return rest.authorize({ scope: "read", expiration: oauthExpiration() });
       })
@@ -5214,10 +5483,22 @@
         }
         showErrorBanner(err, "Authorize");
       });
-  });
+  }
+
+  els.authBtn.addEventListener("click", authorizeHub);
+  if (els.authEmptyBtn) {
+    els.authEmptyBtn.addEventListener("click", authorizeHub);
+  }
 
   if (els.disconnectBtn) {
     els.disconnectBtn.addEventListener("click", function () {
+      if (
+        !window.confirm(
+          "Disconnect Trello? You will need to authorize again before loading boards."
+        )
+      ) {
+        return;
+      }
       disconnectHub();
     });
   }
@@ -5338,6 +5619,10 @@
   if (els.statusRefreshBtn) {
     els.statusRefreshBtn.addEventListener("click", function () {
       hideStatusRefreshBanner();
+      if (boardsMissingFromScan().length) {
+        loadMissingBoards();
+        return;
+      }
       loadStatus(false);
     });
   }
@@ -5408,7 +5693,7 @@
       );
       if (parsed.kind === "none") {
         showBanner(
-          "Choose a team or saved view in Quick start, or close this and tick boards under Filters → Boards before Load boards.",
+          "Choose a team or saved view, or close this and select boards under Filters.",
           "warn",
           { dismissible: true, bannerKind: "load-blocked" }
         );
@@ -5426,7 +5711,7 @@
             warnLoadBlocked({
               title: "No boards for this team",
               message:
-                "This team has no default boards. Tick boards under Filters → Boards, then Load boards.",
+                "This team has no default boards. Select boards under Filters, then view checklists.",
               openFilters: true,
               modal: true,
             });
@@ -5475,6 +5760,10 @@
 
   if (els.scanNudge) {
     els.scanNudge.addEventListener("click", function () {
+      if (boardsMissingFromScan().length) {
+        loadMissingBoards();
+        return;
+      }
       runScan();
     });
   }
@@ -5560,6 +5849,22 @@
     });
   }
 
+  if (els.shortcutsOpenBtn) {
+    els.shortcutsOpenBtn.addEventListener("click", openShortcutsModal);
+  }
+
+  if (els.shortcutsModalClose) {
+    els.shortcutsModalClose.addEventListener("click", closeShortcutsModal);
+  }
+
+  if (els.shortcutsModal) {
+    els.shortcutsModal.addEventListener("click", function (event) {
+      if (event.target && event.target.hasAttribute("data-shortcuts-close")) {
+        closeShortcutsModal();
+      }
+    });
+  }
+
   if (els.apiUsageOpenBtn) {
     els.apiUsageOpenBtn.addEventListener("click", function () {
       openApiUsageModal();
@@ -5634,6 +5939,18 @@
     });
   }
 
+  if (els.boardSearch) {
+    els.boardSearch.addEventListener("input", function () {
+      filterMultiOptions(els.filterBoard, els.boardSearch.value);
+    });
+    els.boardSearch.addEventListener("click", function (event) {
+      event.stopPropagation();
+    });
+    els.boardSearch.addEventListener("keydown", function (event) {
+      event.stopPropagation();
+    });
+  }
+
   if (els.filterGroup) {
     els.filterGroup.addEventListener("change", function () {
       state.groupBy = els.filterGroup.value;
@@ -5668,6 +5985,20 @@
     });
   }
 
+  if (els.configDone) {
+    els.configDone.addEventListener("click", function () {
+      setConfigOpen(false);
+      if (els.configToggle) els.configToggle.focus();
+    });
+  }
+
+  if (els.configBackdrop) {
+    els.configBackdrop.addEventListener("click", function () {
+      setConfigOpen(false);
+      if (els.configToggle) els.configToggle.focus();
+    });
+  }
+
   if (els.themeToggle) {
     els.themeToggle.addEventListener("click", function () {
       applyTheme(state.theme === "dark" ? "light" : "dark");
@@ -5695,6 +6026,10 @@
         els.viewMenu.hidden = false;
         els.viewMenuBtn.setAttribute("aria-expanded", "true");
         if (els.viewToggle) els.viewToggle.classList.add("is-open");
+        var activeOption =
+          els.viewMenu.querySelector('[aria-selected="true"]') ||
+          els.viewMenu.querySelector("[data-view]");
+        if (activeOption) activeOption.focus();
       }
     });
     els.viewMenu.addEventListener("click", function (event) {
@@ -5702,6 +6037,28 @@
       var opt = event.target.closest("[data-view]");
       if (!opt) return;
       setView(opt.getAttribute("data-view"));
+    });
+    els.viewMenu.addEventListener("keydown", function (event) {
+      var options = Array.prototype.slice.call(
+        els.viewMenu.querySelectorAll("[data-view]")
+      );
+      var index = options.indexOf(document.activeElement);
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        var delta = event.key === "ArrowDown" ? 1 : -1;
+        var next = index < 0 ? 0 : (index + delta + options.length) % options.length;
+        options[next].focus();
+      } else if (event.key === "Home" || event.key === "End") {
+        event.preventDefault();
+        options[event.key === "Home" ? 0 : options.length - 1].focus();
+      } else if (event.key === "Enter" || event.key === " ") {
+        var current = document.activeElement;
+        if (current && current.hasAttribute("data-view")) {
+          event.preventDefault();
+          setView(current.getAttribute("data-view"));
+          els.viewMenuBtn.focus();
+        }
+      }
     });
   }
 
@@ -5768,6 +6125,16 @@
         });
         return;
       }
+      var selectedView = findSavedView(id);
+      if (
+        !window.confirm(
+          "Delete saved view “" +
+            ((selectedView && selectedView.name) || "this view") +
+            "”? This cannot be undone."
+        )
+      ) {
+        return;
+      }
       prefsApi.deleteView(id);
       if (prefsApi.loadPrefs().defaultViewId === id) {
         savePrefs({ defaultViewId: "" });
@@ -5794,7 +6161,7 @@
       populateSavedViews();
       els.savedViews.value = id;
       showBanner(
-        "That view will apply after you Load boards next time you open Checklist Hub.",
+        "That view will apply after you view checklists next time.",
         "info",
         { dismissible: true }
       );
@@ -5825,8 +6192,11 @@
 
   function exportFilteredCsv() {
     if (!state.data) return;
+    var filterState = captureFilterState();
     var rows = collectRows()
-      .filter(matchesFilters)
+      .filter(function (item) {
+        return matchesFilters(item, filterState);
+      })
       .filter(function (item) {
         return !isReminderRow(item);
       })
@@ -6073,6 +6443,11 @@
     }
 
     if (key === "Escape") {
+      if (els.shortcutsModal && !els.shortcutsModal.hidden) {
+        closeShortcutsModal();
+        event.preventDefault();
+        return;
+      }
       if (els.apiUsageModal && !els.apiUsageModal.hidden) {
         closeApiUsageModal();
         event.preventDefault();
@@ -6139,12 +6514,23 @@
       return;
     }
 
+    if ((key === "f" || key === "F") && state.filtersOpen && !typing) {
+      event.preventDefault();
+      setConfigOpen(false);
+      return;
+    }
+
     if (modal || typing) return;
     if (!state.token || (els.workspace && els.workspace.hidden)) return;
 
     if (key === "/") {
       event.preventDefault();
       focusSearchField();
+      return;
+    }
+    if (key === "?") {
+      event.preventDefault();
+      openShortcutsModal();
       return;
     }
     if (key === "f" || key === "F") {

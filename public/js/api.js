@@ -2,8 +2,15 @@
   const config = global.CHECKLIST_HUB_CONFIG;
   const BATCH_SIZE = Math.max(
     1,
-    Math.min(10, Number(config.maxConcurrentBoardFetches) || 10)
+    Math.min(
+      10,
+      Number(
+        config.batchRoutesPerRequest || config.maxConcurrentBoardFetches
+      ) || 10
+    )
   );
+  const TOKEN_WINDOW_MS = 10 * 1000;
+  const TOKEN_BUDGET = 90;
 
   /**
    * Ephemeral in-memory only while this page/modal is open.
@@ -11,6 +18,7 @@
    */
   let memoryCache = null;
   const apiUsageEvents = [];
+  const requestBudgetEvents = [];
   const TEAM_CHECKLIST_RE = /^Checklist Hub Team:\s*(.+)$/i;
   const API_LOG_MAX = 200;
 
@@ -62,6 +70,42 @@
     return apiUsageEvents.slice();
   }
 
+  function pruneRequestBudget(now) {
+    while (
+      requestBudgetEvents.length &&
+      now - requestBudgetEvents[0].at >= TOKEN_WINDOW_MS
+    ) {
+      requestBudgetEvents.shift();
+    }
+  }
+
+  function requestBudgetUnits() {
+    return requestBudgetEvents.reduce(function (total, event) {
+      return total + event.units;
+    }, 0);
+  }
+
+  async function reserveRequestBudget(units, signal) {
+    const cost = Math.max(1, Number(units) || 1);
+    while (true) {
+      assertNotAborted(signal);
+      const now = Date.now();
+      pruneRequestBudget(now);
+      if (
+        !requestBudgetEvents.length ||
+        requestBudgetUnits() + cost <= TOKEN_BUDGET
+      ) {
+        requestBudgetEvents.push({ at: now, units: cost });
+        return;
+      }
+      const waitMs = Math.max(
+        50,
+        TOKEN_WINDOW_MS - (now - requestBudgetEvents[0].at) + 25
+      );
+      await sleep(waitMs);
+    }
+  }
+
   async function trelloFetch(path, token, options) {
     const opts = options || {};
     const params = new URLSearchParams(opts.query || {});
@@ -75,13 +119,13 @@
       (path.indexOf("?") >= 0 ? "&" : "?") +
       params.toString();
 
-    logApiUsage(
-      opts.units != null ? opts.units : 1,
-      opts.label || method + " " + path.split("?")[0]
-    );
+    const requestUnits = opts.units != null ? opts.units : 1;
+    const requestLabel = opts.label || method + " " + path.split("?")[0];
 
     let attempt = 0;
     while (true) {
+      await reserveRequestBudget(requestUnits, opts.signal || null);
+      logApiUsage(requestUnits, requestLabel);
       let response;
       try {
         response = await fetch(url, {
@@ -126,14 +170,14 @@
         (Number.isFinite(tokenRemaining) && tokenRemaining <= 5) ||
         (Number.isFinite(keyRemaining) && keyRemaining <= 15)
       ) {
-        await sleep(400);
+        await sleep(1000);
       }
 
       if (response.status === 429) {
         attempt += 1;
         if (attempt > 5) {
           const err = new Error(
-            "Trello is busy right now. Wait a minute, then try Update status or Load boards again."
+            "Trello is busy right now. Wait a minute, then try Refresh again."
           );
           err.name = "TrelloRateLimitError";
           err.status = 429;
@@ -172,7 +216,7 @@
           response.status === 401 || response.status === 403
             ? "Trello refused access. Re-authorize Checklist Hub, or ask an admin to confirm the Power-Up and your board permissions."
             : response.status === 404
-              ? "Trello could not find a board or card that was requested. Try Load boards again; it may have been closed or removed."
+              ? "Trello could not find a requested board or card. Rescan selected boards; it may have been closed or removed."
               : response.status >= 500
                 ? "Trello had a server problem. Wait a moment and try again."
                 : "Something went wrong talking to Trello. Try again, or share the technical details with an admin.";
@@ -214,7 +258,7 @@
       fields: "id,name",
       members: "all",
       member_fields: "id,fullName,username",
-      labels: "all",
+      labels: "none",
       lists: "open",
       list_fields: "id,name",
       cards: "visible",
@@ -224,7 +268,7 @@
       // Board nested checklists may omit items under load; we also refetch
       // /checklists when badges/items look incomplete (see loadBoardsBundle).
       checkItems: "all",
-      checkItem_fields: "all",
+      checkItem_fields: "id,name,state,due,dueReminder,idMember,pos",
     });
     return "/boards/" + boardId + "?" + q.toString();
   }
@@ -257,7 +301,7 @@
     const q = new URLSearchParams({
       cards: "visible",
       checkItems: "all",
-      checkItem_fields: "all",
+      checkItem_fields: "id,name,state,due,dueReminder,idMember,pos",
       fields: "id,name,idCard,pos",
     });
     return "/boards/" + boardId + "/checklists?" + q.toString();
@@ -271,7 +315,7 @@
       checklists: "all",
       checklist_fields: "id,name",
       checkItems: "all",
-      checkItem_fields: "all",
+      checkItem_fields: "id,name,state,due,dueReminder,idMember,pos",
     });
     return "/boards/" + boardId + "/cards?" + q.toString();
   }
@@ -877,6 +921,7 @@
           meStatus.message || "Could not load the signed-in Trello member."
         );
         err.name = "TrelloApiError";
+        err.status = meStatus.status;
         throw err;
       }
       if (!boardsStatus.ok || !boardsStatus.data) {
@@ -884,6 +929,7 @@
           boardsStatus.message || "Could not load your Trello boards."
         );
         err.name = "TrelloApiError";
+        err.status = boardsStatus.status;
         throw err;
       }
 
@@ -1226,6 +1272,7 @@
         meStatus.message || "Could not load the signed-in Trello member."
       );
       err.name = "TrelloApiError";
+      err.status = meStatus.status;
       throw err;
     }
     if (!boardsStatus.ok || !boardsStatus.data) {
@@ -1233,6 +1280,7 @@
         boardsStatus.message || "Could not load your open boards."
       );
       err.name = "TrelloApiError";
+      err.status = boardsStatus.status;
       throw err;
     }
 
@@ -1264,21 +1312,8 @@
 
   async function getChecklistData(token, options) {
     const opts = options || {};
-    const cached = readCache();
-    const ttl = config.cacheTtlMs || 5 * 60 * 1000;
     const boardIds = Array.isArray(opts.boardIds) ? opts.boardIds : [];
     const cacheKey = allowlistCacheKey(boardIds);
-
-    if (
-      !opts.forceRefresh &&
-      cached &&
-      cached.me &&
-      cached.fetchedAt &&
-      cached.allowlistKey === cacheKey &&
-      Date.now() - cached.fetchedAt < ttl
-    ) {
-      return { data: withRemindersExpanded(cached), fromCache: true };
-    }
 
     const data = await loadBoardsBundle(token, {
       onProgress: opts.onProgress,
@@ -1304,7 +1339,7 @@
         checklists: "all",
         checklist_fields: "id,name",
         checkItems: "all",
-        checkItem_fields: "all",
+        checkItem_fields: "id,name,state,due,dueReminder,idMember,pos",
       }).toString()
     );
   }
@@ -1360,6 +1395,84 @@
 
     source.statusSyncedAt = Date.now();
     return source;
+  }
+
+  async function loadAdditionalBoards(token, data, boardIds, options) {
+    const source = data || readCache();
+    const ids = (Array.isArray(boardIds) ? boardIds : [])
+      .map(String)
+      .filter(Boolean);
+    if (!source || !ids.length) {
+      return {
+        data: source,
+        fromCache: true,
+        incremental: true,
+        meta: {
+          httpCalls: 0,
+          rateLimitUnits: 0,
+          boardCount: 0,
+          boardErrors: [],
+          strategy: "no additional boards",
+        },
+      };
+    }
+
+    const selected = {};
+    ids.forEach(function (id) {
+      selected[id] = true;
+    });
+    const catalog = (source.boards || []).filter(function (board) {
+      return selected[board.id];
+    });
+    ids.forEach(function (id) {
+      if (
+        !catalog.some(function (board) {
+          return board.id === id;
+        })
+      ) {
+        catalog.push({ id: id, name: id });
+      }
+    });
+
+    const opts = options || {};
+    const slice = await loadBoardsBundle(token, {
+      me: source.me,
+      boards: catalog,
+      allBoards: source.boards || catalog,
+      boardIds: ids,
+      signal: opts.signal || null,
+      onProgress: opts.onProgress,
+    });
+
+    source.items = stripReminderRows(source.items);
+    source.memberCards = stripReminderRows(source.memberCards);
+    mergeBoardSlice(source, slice);
+    const scanned = {};
+    (source.scannedBoardIds || []).forEach(function (id) {
+      scanned[id] = true;
+    });
+    (slice.scannedBoardIds || ids).forEach(function (id) {
+      scanned[id] = true;
+    });
+    source.scannedBoardIds = Object.keys(scanned);
+    source.fetchedAt = Date.now();
+    source.allowlistKey = allowlistCacheKey(source.scannedBoardIds);
+    source.meta = Object.assign({}, source.meta || {}, {
+      boardCount: source.scannedBoardIds.length,
+      httpCalls: (slice.meta && slice.meta.httpCalls) || 0,
+      rateLimitUnits: (slice.meta && slice.meta.rateLimitUnits) || 0,
+      boardErrors: (slice.meta && slice.meta.boardErrors) || [],
+      strategy: "incremental selected-board scan",
+    });
+    withRemindersExpanded(source);
+    writeCache(source);
+
+    return {
+      data: source,
+      fromCache: false,
+      incremental: true,
+      meta: source.meta,
+    };
   }
 
   function applyCardRefresh(source, cardId, fresh, options) {
@@ -1462,7 +1575,7 @@
     nextItems.forEach(function (item) {
       const prev = prevById[item.id];
       if (!prev) {
-        // Update status only refreshes known rows — new check items need Scan.
+        // A quick refresh only updates known rows; new check items need a rescan.
         return;
       }
       if (
@@ -1647,7 +1760,9 @@
     // Prefer per-card when unit counts are close — board GETs pull large
     // nested payloads. Use board strategy only when it clearly saves units.
     const useBoardStrategy =
-      uniqueBoards.length > 0 && uniqueBoards.length * 2 < uniqueCards.length;
+      uniqueBoards.length > 0 &&
+      uniqueBoards.length <= 3 &&
+      uniqueBoards.length * 8 <= uniqueCards.length;
 
     if (useBoardStrategy) {
       const boardSummaries = uniqueBoards.map(function (id) {
@@ -1810,6 +1925,7 @@
   global.ChecklistHubApi = {
     getChecklistData: getChecklistData,
     loadBoardCatalog: loadBoardCatalog,
+    loadAdditionalBoards: loadAdditionalBoards,
     refreshKnownStatus: refreshKnownStatus,
     refreshKnownItems: refreshKnownItems,
     refreshKnownMemberCards: refreshKnownMemberCards,
@@ -1821,6 +1937,7 @@
     withRemindersExpanded: withRemindersExpanded,
     normalizeMemberId: normalizeMemberId,
     applyCardRefresh: applyCardRefresh,
+    mergeBoardSlice: mergeBoardSlice,
     allowlistCacheKey: allowlistCacheKey,
     parseTeamsFromBoardPayload: parseTeamsFromBoardPayload,
     extractShortLink: extractShortLink,

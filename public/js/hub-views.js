@@ -641,7 +641,7 @@
     if (!hasBars) {
       appendEmpty(
         root,
-        "No dated items for a Gantt",
+        "No dated items for a timeline",
         undated
           ? undated + " undated item" + (undated === 1 ? "" : "s") + " omitted from bars."
           : "Add due dates, or widen filters."
@@ -726,7 +726,7 @@
 
     var head = el("div", "gantt-row gantt-head");
     head.appendChild(
-      el("div", "gantt-label gantt-corner", "Project · card · checklist")
+      el("div", "gantt-label gantt-corner", "Board · card · checklist")
     );
     var headDays = el("div", "gantt-days");
     days.forEach(function (day, index) {
@@ -874,14 +874,14 @@
         board.cards.length +
           " card" +
           (board.cards.length === 1 ? "" : "s") +
-          " · project",
+          " · board",
         board.name
       );
       var boardTrack = el("div", "gantt-days");
       paintTrack(
         boardTrack,
         board.span,
-        formatSpanTitle(board.name + " (project)", board.span),
+        formatSpanTitle(board.name + " (board)", board.span),
         null
       );
       boardRow.appendChild(boardTrack);
@@ -962,6 +962,34 @@
   function render(view, root, items, host) {
     root.innerHTML = "";
     root.setAttribute("data-view", view || "");
+    var intros = {
+      agenda: [
+        "Today’s agenda",
+        "Overdue, today, and tomorrow work in one focused sequence.",
+      ],
+      horizon: [
+        "Upcoming by board",
+        "Compare where overdue and upcoming work is concentrated.",
+      ],
+      workload: [
+        "Workload",
+        "Review open assignments by person; this is a review signal, not a performance score.",
+      ],
+      progress: [
+        "Checklist progress",
+        "See completion and overdue work grouped by Trello card.",
+      ],
+      gantt: [
+        "Timeline",
+        "Due-date range by board, card, and checklist. Open Trello to change dates.",
+      ],
+    };
+    if (intros[view]) {
+      var intro = el("div", "insight-intro");
+      intro.appendChild(el("h2", "insight-intro-title", intros[view][0]));
+      intro.appendChild(el("p", "insight-intro-body", intros[view][1]));
+      root.appendChild(intro);
+    }
     if (view === "agenda") renderAgenda(root, items, host);
     else if (view === "horizon") renderHorizon(root, items, host);
     else if (view === "workload") renderWorkload(root, items, host);
