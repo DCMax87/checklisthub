@@ -3,8 +3,17 @@
   const statusEl = document.getElementById("auth-status");
   const btn = document.getElementById("authorize-btn");
 
+  function configuredAppKey() {
+    var key = String((config && config.appKey) || "").trim();
+    if (!key || /YOUR_TRELLO_API_KEY/i.test(key) || /^YOUR_/i.test(key)) {
+      return "";
+    }
+    return key;
+  }
+
+  var appKey = configuredAppKey();
   const t = window.TrelloPowerUp.iframe({
-    appKey: config.appKey,
+    appKey: appKey || (config && config.appKey) || "",
     appName: config.appName,
     appAuthor: config.appAuthor,
   });
@@ -19,7 +28,23 @@
     t.sizeTo("body");
   });
 
+  if (!appKey) {
+    setStatus(
+      "Checklist Hub loaded a placeholder API key. Wait for the latest deploy, hard-refresh, then try again.",
+      true
+    );
+    btn.disabled = true;
+  }
+
   btn.addEventListener("click", function () {
+    if (!configuredAppKey()) {
+      setStatus(
+        "Checklist Hub is still using the placeholder API key. Hard-refresh after deploy, or set appKey in config.js.",
+        true
+      );
+      return;
+    }
+
     btn.disabled = true;
     setStatus("Waiting for Trello authorization…");
 
@@ -53,6 +78,9 @@
         if (/YOUR_TRELLO_API_KEY|appKey/i.test(msg)) {
           msg =
             "Checklist Hub is not configured yet. An admin needs to set the Power-Up API key.";
+        } else if (/app not found/i.test(msg)) {
+          msg =
+            "Trello does not recognise this API key. Confirm config.js matches Power-Ups admin → API key, and Allowed Origins includes https://dcmax87.github.io.";
         }
         setStatus(msg, true);
       });
