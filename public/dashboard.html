@@ -19,8 +19,8 @@
       href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./css/dashboard.css?v=20260916b" />
-    <script src="./js/theme-boot.js?v=20260916b"></script>
+    <link rel="stylesheet" href="./css/dashboard.css?v=20260916d" />
+    <script src="./js/theme-boot.js?v=20260916d"></script>
   </head>
   <body class="dashboard-page">
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -210,7 +210,7 @@
           <p id="filter-summary" class="filter-summary"></p>
           <div class="focus-tools">
             <div class="focus-chips" id="focus-chips" role="group" aria-label="Quick due filters">
-              <button type="button" class="chip chip-emphasis is-active" data-due-chip="myday" aria-pressed="true">
+              <button type="button" class="chip" data-due-chip="myday" aria-pressed="false">
                 My day
               </button>
               <button type="button" class="chip" data-due-chip="upcoming" aria-pressed="false">
@@ -219,7 +219,7 @@
               <button type="button" class="chip" data-due-chip="none" aria-pressed="false">
                 Undated
               </button>
-              <button type="button" class="chip" data-due-chip="all" aria-pressed="false">
+              <button type="button" class="chip chip-emphasis is-active" data-due-chip="all" aria-pressed="true">
                 All work
               </button>
             </div>
@@ -307,6 +307,14 @@
           >
             <input type="checkbox" id="filter-hide-cards" />
             <span>Hide member-only cards</span>
+          </label>
+          <label
+            class="stage-check"
+            id="stage-show-unassigned"
+            title="When unchecked, checklist items with no assignee stay hidden in every view"
+          >
+            <input type="checkbox" id="filter-show-unassigned" />
+            <span>Show unassigned</span>
           </label>
           <label
             class="stage-check"
@@ -535,8 +543,8 @@
         <div class="config-grid">
           <!-- Synced from due chips / Hide cards; kept out of the visual filter grid -->
           <select id="filter-due" class="sr-only" aria-hidden="true" tabindex="-1">
-            <option value="all">Any due date</option>
-            <option value="myday" selected>My day (overdue + today)</option>
+            <option value="all" selected>Any due date</option>
+            <option value="myday">My day (overdue + today)</option>
             <option value="upcoming">Upcoming</option>
             <option value="overdue">Overdue</option>
             <option value="today">Due today</option>
@@ -1128,16 +1136,17 @@
     </div>
 
     <!-- mock-data.js stays wired so demo.html / top-level opens work without Trello. -->
-    <script src="./config.js?v=20260916b"></script>
+    <script src="./config.js?v=20260916d"></script>
     <script src="https://p.trellocdn.com/power-up.min.js"></script>
-    <script src="./js/demo-mode.js?v=20260916b"></script>
-    <script src="./js/cookies.js?v=20260916b"></script>
-    <script src="./js/prefs.js?v=20260916b"></script>
-    <script src="./js/mock-data.js?v=20260916b"></script>
-    <script src="./js/api.js?v=20260916b"></script>
-    <script src="./js/date-utils.js?v=20260916b"></script>
-    <script src="./js/filter-state.js?v=20260916b"></script>
-    <script src="./js/hub-views.js?v=20260916b"></script>
-    <script src="./js/dashboard.js?v=20260916b"></script>
+    <script src="./js/demo-mode.js?v=20260916d"></script>
+    <script src="./js/cookies.js?v=20260916d"></script>
+    <script src="./js/prefs.js?v=20260916d"></script>
+    <script src="./js/mock-data.js?v=20260916d"></script>
+    <script src="./js/api.js?v=20260916d"></script>
+    <script src="./js/date-utils.js?v=20260916d"></script>
+    <script src="./js/filter-state.js?v=20260916d"></script>
+    <script src="./js/markdown-inline.js?v=20260916d"></script>
+    <script src="./js/hub-views.js?v=20260916d"></script>
+    <script src="./js/dashboard.js?v=20260916d"></script>
   </body>
 </html>

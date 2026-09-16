@@ -4,6 +4,7 @@
   var prefsApi = window.ChecklistHubPrefs;
   var cookies = window.ChecklistHubCookies;
   var demoMode = window.ChecklistHubDemoMode || {};
+  var mdApi = window.ChecklistHubMarkdown || {};
   var params = new URLSearchParams(window.location.search);
   var powerUpMissing =
     typeof demoMode.powerUpMissingWhileEmbedded === "function"
@@ -79,6 +80,7 @@
     filterAssignee: document.getElementById("filter-assignee"),
     filterHideCompleted: document.getElementById("filter-hide-completed"),
     filterHideCards: document.getElementById("filter-hide-cards"),
+    filterShowUnassigned: document.getElementById("filter-show-unassigned"),
     stageHideCompleted: document.getElementById("stage-hide-completed"),
     stageHideCards: document.getElementById("stage-hide-cards"),
     stageReminders: document.getElementById("stage-reminders"),
@@ -198,6 +200,7 @@
     workType: prefs.workType === "card" ? "card" : "both",
     showReminders: Boolean(prefs.showReminders),
     hideCompleted: prefs.hideCompleted !== false,
+    showUnassigned: Boolean(prefs.showUnassigned),
     hideCards:
       Boolean(prefs.hideCards) || prefs.workType === "checkitem",
     density: prefs.density === "compact" ? "compact" : "comfortable",
@@ -261,8 +264,11 @@
   if (els.filterHideCards) {
     els.filterHideCards.checked = state.hideCards;
   }
+  if (els.filterShowUnassigned) {
+    els.filterShowUnassigned.checked = state.showUnassigned;
+  }
   if (els.filterDue) {
-    els.filterDue.value = "myday";
+    els.filterDue.value = "all";
   }
   if (els.viewSelect) {
     els.viewSelect.value = state.view;
@@ -309,6 +315,7 @@
     if (patch.showReminders != null) state.showReminders = next.showReminders;
     if (patch.hideCompleted != null) state.hideCompleted = next.hideCompleted;
     if (patch.hideCards != null) state.hideCards = next.hideCards;
+    if (patch.showUnassigned != null) state.showUnassigned = next.showUnassigned;
     if (patch.density != null) state.density = next.density;
     if (patch.theme != null) state.theme = next.theme;
     if (patch.groupPageSize != null) state.groupPageSize = next.groupPageSize;
@@ -1082,6 +1089,7 @@
       searchInput: els.filterSearch,
       hideCompleted: state.hideCompleted,
       hideCards: state.hideCards,
+      showUnassigned: state.showUnassigned,
       view: state.view,
       bypassDue: state.bypassDue,
     });
@@ -1451,19 +1459,11 @@
     var rowState = itemState(item);
     var boardOptionCount = filters.boardOptionCount;
 
-    if (!people.length) {
-      // Anyone: assigned work only — no org-wide unassigned dump.
-      if (!item.idMember) return false;
-    } else {
-      var ok = false;
-      if (item.idMember && people.indexOf(item.idMember) >= 0) ok = true;
-      if (!item.idMember) {
-        var cardMembers = item.idMembers || [];
-        ok = people.some(function (id) {
-          return cardMembers.indexOf(id) >= 0;
-        });
-      }
-      if (!ok) return false;
+    if (!item.idMember) {
+      // Unassigned checklist items stay hidden unless explicitly opted in.
+      if (!filters.showUnassigned) return false;
+    } else if (people.length && people.indexOf(item.idMember) === -1) {
+      return false;
     }
 
     // Ticked boards = visible. Empty selection = show nothing.
@@ -1573,6 +1573,7 @@
         .join(" ");
       var hay = [
         item.name,
+        plainItemTitle(item.name),
         item.cardName,
         item.boardName,
         item.checklistName,
@@ -1886,6 +1887,56 @@
     return tr;
   }
 
+  function appendItemTitle(parent, text, options) {
+    var title = text == null ? "" : String(text);
+    if (mdApi && typeof mdApi.appendInline === "function") {
+      mdApi.appendInline(parent, title, options || {});
+      return;
+    }
+    parent.appendChild(document.createTextNode(title));
+  }
+
+  function plainItemTitle(text) {
+    if (mdApi && typeof mdApi.strip === "function") {
+      return mdApi.strip(text);
+    }
+    return String(text == null ? "" : text);
+  }
+
+  function titleHasMarkdownLink(text) {
+    return /\[[^\]]+\]\(https?:[^)\s]+\)/.test(String(text || ""));
+  }
+
+  /** Render a checklist/card title with inline markdown; card link when safe. */
+  function appendLinkedItemTitle(parent, item, linkClassName) {
+    var title = item && item.name != null ? String(item.name) : "";
+    var className = linkClassName || "item-name-link";
+    var cardUrl = item && item.cardUrl;
+    var useCardLink = Boolean(cardUrl) && !titleHasMarkdownLink(title);
+
+    if (useCardLink) {
+      var nameLink = document.createElement("a");
+      nameLink.className = className;
+      nameLink.target = "_blank";
+      nameLink.rel = "noopener noreferrer";
+      appendItemTitle(nameLink, title, { allowLinks: false });
+      if (applySafeHref(nameLink, cardUrl)) {
+        parent.appendChild(nameLink);
+      } else {
+        var fallback = document.createElement("span");
+        fallback.className = className;
+        appendItemTitle(fallback, title, { allowLinks: true });
+        parent.appendChild(fallback);
+      }
+      return;
+    }
+
+    var nameSpan = document.createElement("span");
+    nameSpan.className = className;
+    appendItemTitle(nameSpan, title, { allowLinks: true });
+    parent.appendChild(nameSpan);
+  }
+
   function createItemRow(item) {
     var tr = document.createElement("tr");
     var rowState = itemState(item);
@@ -1901,20 +1952,7 @@
     var nameWrap = document.createElement("div");
     nameWrap.className = "item-name";
     appendTypePills(nameWrap, item);
-    if (item.cardUrl) {
-      var nameLink = document.createElement("a");
-      nameLink.className = "item-name-link";
-      nameLink.target = "_blank";
-      nameLink.rel = "noopener noreferrer";
-      nameLink.textContent = item.name;
-      if (applySafeHref(nameLink, item.cardUrl)) {
-        nameWrap.appendChild(nameLink);
-      } else {
-        nameWrap.appendChild(document.createTextNode(item.name));
-      }
-    } else {
-      nameWrap.appendChild(document.createTextNode(item.name));
-    }
+    appendLinkedItemTitle(nameWrap, item, "item-name-link");
     var meta = document.createElement("div");
     meta.className = "item-meta";
     var metaBits = [];
@@ -2380,7 +2418,9 @@
             (itemState(item) === "complete" ? " is-complete" : "");
           var previewText = document.createElement("span");
           previewText.className = "cal-item-text";
-          previewText.textContent = item.name || item.cardName || "Untitled";
+          previewText.textContent = plainItemTitle(
+            item.name || item.cardName || "Untitled"
+          );
           preview.appendChild(previewText);
           if (preview.tagName === "A") {
             preview.target = "_blank";
@@ -2818,6 +2858,9 @@
       workKind: workKind,
       dateKey: dateKey,
       remindersOn: remindersEnabled,
+      appendItemTitle: appendItemTitle,
+      plainItemTitle: plainItemTitle,
+      appendLinkedItemTitle: appendLinkedItemTitle,
       onSelect: function (id) {
         state.selectedRowId = id;
         highlightSelectedRow();
@@ -3099,6 +3142,7 @@
       search: els.filterSearch.value || "",
       showReminders: state.showReminders,
       hideCards: state.hideCards,
+      showUnassigned: state.showUnassigned,
     };
   }
 
@@ -3150,6 +3194,7 @@
       view.hideCards != null
         ? Boolean(view.hideCards)
         : view.workType === "checkitem";
+    state.showUnassigned = Boolean(view.showUnassigned);
     state.collapsedGroups = Object.assign({}, view.collapsedGroups || {});
     if (els.filterWorkType) els.filterWorkType.value = state.workType;
     if (els.filterReminders) {
@@ -3160,6 +3205,9 @@
     }
     if (els.filterHideCards) {
       els.filterHideCards.checked = state.hideCards;
+    }
+    if (els.filterShowUnassigned) {
+      els.filterShowUnassigned.checked = state.showUnassigned;
     }
     if (els.filterGroup) els.filterGroup.value = state.groupBy;
     els.filterDue.value = view.due || "all";
@@ -3199,6 +3247,7 @@
       showReminders: state.showReminders,
       hideCompleted: state.hideCompleted,
       hideCards: state.hideCards,
+      showUnassigned: state.showUnassigned,
       calendarMode: state.calendarMode,
     });
     renderTable();
@@ -3257,6 +3306,9 @@
 
     if (state.hideCompleted && viewUsesHideCompleted(state.view)) {
       bits.push("Open");
+    }
+    if (state.showUnassigned) {
+      bits.push("Unassigned");
     }
     if (state.showReminders && viewUsesReminders(state.view)) {
       bits.push("Reminders");
@@ -5304,7 +5356,9 @@
           main.className = "gantt-checklist-modal-main";
           var name = document.createElement("span");
           name.className = "gantt-checklist-modal-name";
-          name.textContent = item.name || "Untitled item";
+          appendItemTitle(name, item.name || "Untitled item", {
+            allowLinks: true,
+          });
           main.appendChild(name);
 
           var actions = document.createElement("div");
@@ -5564,6 +5618,14 @@
     els.filterHideCards.addEventListener("change", function () {
       state.hideCards = Boolean(els.filterHideCards.checked);
       savePrefs({ hideCards: state.hideCards });
+      renderTable();
+    });
+  }
+
+  if (els.filterShowUnassigned) {
+    els.filterShowUnassigned.addEventListener("change", function () {
+      state.showUnassigned = Boolean(els.filterShowUnassigned.checked);
+      savePrefs({ showUnassigned: state.showUnassigned });
       renderTable();
     });
   }

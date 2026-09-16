@@ -201,15 +201,19 @@
         body.appendChild(kind);
 
         var title = el("div", "agenda-title");
-        var agendaSafe = safeHref(item.cardUrl);
-        if (agendaSafe) {
-          var titleLink = el("a", "agenda-title-link", item.name);
-          titleLink.href = agendaSafe;
-          titleLink.target = "_blank";
-          titleLink.rel = "noopener noreferrer";
-          title.appendChild(titleLink);
+        if (typeof host.appendLinkedItemTitle === "function") {
+          host.appendLinkedItemTitle(title, item, "agenda-title-link");
         } else {
-          title.textContent = item.name;
+          var agendaSafe = safeHref(item.cardUrl);
+          if (agendaSafe) {
+            var titleLink = el("a", "agenda-title-link", item.name);
+            titleLink.href = agendaSafe;
+            titleLink.target = "_blank";
+            titleLink.rel = "noopener noreferrer";
+            title.appendChild(titleLink);
+          } else {
+            title.textContent = item.name;
+          }
         }
         body.appendChild(title);
 

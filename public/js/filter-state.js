@@ -26,6 +26,7 @@
         .toLowerCase(),
       hideCompleted: Boolean(opts.hideCompleted),
       hideCards: Boolean(opts.hideCards),
+      showUnassigned: Boolean(opts.showUnassigned),
       view: opts.view || "list",
       bypassDue: Boolean(opts.bypassDue),
     };

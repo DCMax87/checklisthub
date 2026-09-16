@@ -42,6 +42,7 @@
       showReminders: false,
       hideCompleted: true,
       hideCards: false,
+      showUnassigned: false,
       calendarMode: "month",
     };
   }
@@ -79,6 +80,7 @@
       showReminders: Boolean(next.showReminders),
       hideCompleted: next.hideCompleted !== false,
       hideCards: Boolean(next.hideCards),
+      showUnassigned: Boolean(next.showUnassigned),
       calendarMode: next.calendarMode === "week" ? "week" : "month",
     };
     cookies.writeJson(PREFS_COOKIE, safe, 180);
@@ -110,6 +112,7 @@
         search: String(view.search || "").slice(0, 80),
         showReminders: Boolean(view.showReminders),
         hideCards: Boolean(view.hideCards),
+        showUnassigned: Boolean(view.showUnassigned),
       };
     });
     cookies.writeJson(VIEWS_COOKIE, compact, 180);
