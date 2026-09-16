@@ -17,7 +17,7 @@ window.CHECKLIST_HUB_CONFIG = {
   /** Alternate support link (docs, issues). Optional. */
   supportUrl: "",
   /** Display version in the hub footer. */
-  appVersion: "1.1.1",
+  appVersion: "1.1.2",
   /** After this age, suggest a full selected-board rescan for new work. */
   rescanNudgeMs: 15 * 60 * 1000,
   /**

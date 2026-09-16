@@ -485,6 +485,22 @@
     return allowed[value] ? value : "30days";
   }
 
+  /**
+   * OAuth return must NOT be dashboard.html: the consent popup loads return_url
+   * as a top-level window, and dashboard treats top-level as demo — which
+   * replaces the Power-Up client and breaks re-authorization.
+   */
+  function oauthAuthReturnUrl() {
+    try {
+      var url = new URL("./authorize.html", window.location.href);
+      url.hash = "";
+      url.search = "";
+      return url.href;
+    } catch (e) {
+      return String(window.location.href || "").replace(/[^/]*$/, "authorize.html");
+    }
+  }
+
   function safeCardUrl(url) {
     if (demoMode && typeof demoMode.safeTrelloUrl === "function") {
       return demoMode.safeTrelloUrl(url);
@@ -5475,9 +5491,15 @@
       showWelcomeModal(true);
       return Promise.resolve();
     }
+    els.subtitle.textContent = "Waiting for Trello authorization…";
     return getRestApiClient()
       .then(function (rest) {
-        return rest.authorize({ scope: "read", expiration: oauthExpiration() });
+        return rest.authorize({
+          scope: "read",
+          expiration: oauthExpiration(),
+          // Consent popup redirects here; must be authorize.html (not dashboard).
+          return_url: oauthAuthReturnUrl(),
+        });
       })
       .then(function () {
         return ensureAuthorized();

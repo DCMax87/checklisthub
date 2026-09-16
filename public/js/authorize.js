@@ -48,10 +48,22 @@
     btn.disabled = true;
     setStatus("Waiting for Trello authorization…");
 
+    var returnUrl;
+    try {
+      var authReturn = new URL(window.location.href);
+      authReturn.hash = "";
+      // Keep path on authorize.html so the consent popup never lands on
+      // dashboard.html (top-level dashboard boots demo mode and breaks handoff).
+      returnUrl = authReturn.href;
+    } catch (e) {
+      returnUrl = window.location.href;
+    }
+
     t.getRestApi()
       .authorize({
         scope: "read",
         expiration: (config && config.oauthExpiration) || "30days",
+        return_url: returnUrl,
       })
       .then(function () {
         setStatus("Authorized. Opening Checklist Hub…");

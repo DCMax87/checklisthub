@@ -12,15 +12,30 @@
     }
   }
 
+  function hasAuthOpener(options) {
+    var opts = options || {};
+    if (typeof opts.hasOpener === "boolean") return opts.hasOpener;
+    try {
+      return Boolean(global.opener && !global.opener.closed);
+    } catch (e) {
+      // Cross-origin opener still means this is likely an OAuth return window.
+      return Boolean(global.opener);
+    }
+  }
+
   /**
    * Demo is only for top-level play (demo.html, localhost, marketing).
    * When embedded, always return false — even if ?demo=1 or forceDemo is set.
+   * OAuth consent return windows also stay out of demo: they load our origin
+   * top-level with window.opener set, and demo mode would replace the Power-Up
+   * client and break token handoff.
    */
   function detectDemoMode(searchParams, hubConfig, options) {
     var opts = options || {};
     var embedded =
       typeof opts.embedded === "boolean" ? opts.embedded : isEmbedded();
     if (embedded) return false;
+    if (hasAuthOpener(opts)) return false;
 
     var params = searchParams || new URLSearchParams("");
     if (
