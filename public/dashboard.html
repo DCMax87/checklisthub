@@ -19,8 +19,8 @@
       href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./css/dashboard.css?v=20260916d" />
-    <script src="./js/theme-boot.js?v=20260916d"></script>
+    <link rel="stylesheet" href="./css/dashboard.css?v=20260916o" />
+    <script src="./js/theme-boot.js?v=20260916o"></script>
   </head>
   <body class="dashboard-page">
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -140,42 +140,6 @@
           <span class="material-symbols-outlined" aria-hidden="true">radar</span>
           <span class="btn-label">View checklists</span>
         </button>
-        <div class="split-action" id="sync-actions" hidden>
-          <button
-            type="button"
-            id="status-btn"
-            class="btn btn-primary split-action-main"
-            disabled
-            title="Refresh open items already loaded"
-          >
-            <span class="material-symbols-outlined" aria-hidden="true">sync</span>
-            <span class="btn-label">Refresh</span>
-          </button>
-          <button
-            type="button"
-            id="sync-menu-btn"
-            class="btn btn-primary split-action-toggle"
-            disabled
-            aria-haspopup="true"
-            aria-expanded="false"
-            aria-controls="sync-menu"
-            aria-label="More sync options"
-            title="More sync options"
-          >
-            <span class="material-symbols-outlined" aria-hidden="true">expand_more</span>
-          </button>
-          <div id="sync-menu" class="split-action-menu" hidden>
-            <button type="button" id="sync-scan-btn">
-              <span class="split-action-item-title">
-                <span class="material-symbols-outlined" aria-hidden="true">radar</span>
-                Rescan selected boards
-              </span>
-              <span class="split-action-item-desc">
-                Find new assignments and refresh all selected boards
-              </span>
-            </button>
-          </div>
-        </div>
         <button type="button" id="auth-btn" class="btn btn-primary" hidden>
           <span class="material-symbols-outlined" aria-hidden="true">lock_open</span>
           <span class="btn-label">Authorize</span>
@@ -243,7 +207,7 @@
             title="Look again for work assigned since the last load"
           >
             <span class="material-symbols-outlined" aria-hidden="true">radar</span>
-          <span class="scan-nudge-label">Rescan for new work</span>
+          <span class="scan-nudge-label">Refresh selected boards</span>
           </button>
           <button
             type="button"
@@ -295,26 +259,26 @@
           <label
             class="stage-check"
             id="stage-hide-completed"
-            title="When checked, completed items stay hidden"
+            title="Show completed checklist items and cards"
           >
-            <input type="checkbox" id="filter-hide-completed" checked />
-            <span>Hide completed</span>
+            <input type="checkbox" id="filter-show-completed" />
+            <span>Completed</span>
           </label>
           <label
             class="stage-check"
             id="stage-hide-cards"
-            title="Hide member cards that have no checklist tasks. Timeline checklist bars remain."
+            title="Show member cards that have no checklist tasks"
           >
-            <input type="checkbox" id="filter-hide-cards" />
-            <span>Hide member-only cards</span>
+            <input type="checkbox" id="filter-show-member-cards" />
+            <span>Member Only Cards</span>
           </label>
           <label
             class="stage-check"
             id="stage-show-unassigned"
-            title="When unchecked, checklist items with no assignee stay hidden in every view"
+            title="Show checklist items with no assignee"
           >
             <input type="checkbox" id="filter-show-unassigned" />
-            <span>Show unassigned</span>
+            <span>Unassigned</span>
           </label>
           <label
             class="stage-check"
@@ -322,7 +286,7 @@
             title="Show lead-day reminder rows for tasks and cards"
           >
             <input type="checkbox" id="filter-reminders" />
-            <span>Show reminder dates</span>
+            <span>Reminder Dates</span>
           </label>
           <label class="group-field" id="group-field">
             <span>Group</span>
@@ -377,8 +341,8 @@
         role="status"
       >
         <p class="status-refresh-text">
-          This view may be out of date. Refresh checks work already here;
-          rescan selected boards to find new assignments.
+          This view may be out of date. Refresh reloads checklist work from all
+          selected boards.
         </p>
         <div class="status-refresh-actions">
           <button type="button" id="status-refresh-dismiss" class="btn btn-ghost">
@@ -1002,14 +966,40 @@
         </p>
 
         <div id="welcome-starter-block" class="welcome-teams" hidden>
-          <label class="field-label" for="welcome-starter">Quick start</label>
-          <select id="welcome-starter" aria-describedby="welcome-starter-hint">
-            <option value="">None — select boards yourself</option>
-          </select>
-          <p id="welcome-starter-hint" class="welcome-note">
-            Pick a <strong>team</strong> (from this board) or a <strong>saved
-            view</strong>, then start. Or select boards under Filters.
-          </p>
+          <div id="welcome-quick-start" class="welcome-quick-start">
+            <label class="field-label" for="welcome-starter">Quick start</label>
+            <select id="welcome-starter" aria-describedby="welcome-starter-hint">
+              <option value="">None — pick boards below</option>
+            </select>
+            <p id="welcome-starter-hint" class="welcome-note">
+              Optionally pick a <strong>team</strong> or <strong>saved view</strong>,
+              or tick boards below.
+            </p>
+          </div>
+
+          <div id="welcome-boards-block" class="welcome-boards" hidden>
+            <div class="welcome-boards-head">
+              <span class="field-label" id="welcome-boards-label">Boards</span>
+              <div class="welcome-boards-actions">
+                <button type="button" id="welcome-boards-all" class="btn btn-ghost">
+                  Select all
+                </button>
+                <button type="button" id="welcome-boards-clear" class="btn btn-ghost">
+                  Clear
+                </button>
+              </div>
+            </div>
+            <div
+              id="welcome-board-options"
+              class="welcome-board-options multi-options"
+              role="group"
+              aria-labelledby="welcome-boards-label"
+            ></div>
+            <p id="welcome-boards-empty" class="welcome-note" hidden>
+              Board names are still loading…
+            </p>
+          </div>
+
           <button type="button" id="welcome-starter-load" class="btn btn-primary" disabled>
             <span class="material-symbols-outlined" aria-hidden="true">radar</span>
             <span class="btn-label">View checklists</span>
@@ -1018,8 +1008,8 @@
 
         <div class="welcome-actions welcome-actions-split">
           <button type="button" id="welcome-dismiss" class="btn btn-ghost">
-            <span class="material-symbols-outlined" aria-hidden="true">check</span>
-            <span class="btn-label">Don't show again</span>
+            <span class="material-symbols-outlined" aria-hidden="true">close</span>
+            <span class="btn-label">Close</span>
           </button>
           <button
             type="button"
@@ -1044,13 +1034,14 @@
     >
       <div class="welcome-backdrop" data-scan-confirm-close></div>
       <div class="welcome-dialog">
-        <h2 id="scan-confirm-title">Rescan selected boards?</h2>
+        <h2 id="scan-confirm-title">Refresh selected boards?</h2>
         <p class="welcome-lead">
-          This checks every selected board for new and changed checklist work.
+          This reloads checklist work from every selected board, including new
+          and changed items.
         </p>
         <p class="welcome-note">
-          Use the regular <strong>Refresh</strong> action for work already here.
-          Rescan when you need newly assigned work.
+          Prefer this when you want a full update. Filters → Done also loads
+          newly selected boards.
         </p>
         <div class="welcome-actions">
           <button type="button" id="scan-confirm-cancel" class="btn btn-ghost">
@@ -1058,8 +1049,8 @@
             <span class="btn-label">Not now</span>
           </button>
           <button type="button" id="scan-confirm-ok" class="btn btn-primary">
-            <span class="material-symbols-outlined" aria-hidden="true">radar</span>
-            <span class="btn-label">Rescan boards</span>
+            <span class="material-symbols-outlined" aria-hidden="true">sync</span>
+            <span class="btn-label">Refresh boards</span>
           </button>
         </div>
       </div>
@@ -1136,17 +1127,17 @@
     </div>
 
     <!-- mock-data.js stays wired so demo.html / top-level opens work without Trello. -->
-    <script src="./config.js?v=20260916d"></script>
+    <script src="./config.js?v=20260916o"></script>
     <script src="https://p.trellocdn.com/power-up.min.js"></script>
-    <script src="./js/demo-mode.js?v=20260916d"></script>
-    <script src="./js/cookies.js?v=20260916d"></script>
-    <script src="./js/prefs.js?v=20260916d"></script>
-    <script src="./js/mock-data.js?v=20260916d"></script>
-    <script src="./js/api.js?v=20260916d"></script>
-    <script src="./js/date-utils.js?v=20260916d"></script>
-    <script src="./js/filter-state.js?v=20260916d"></script>
-    <script src="./js/markdown-inline.js?v=20260916d"></script>
-    <script src="./js/hub-views.js?v=20260916d"></script>
-    <script src="./js/dashboard.js?v=20260916d"></script>
+    <script src="./js/demo-mode.js?v=20260916o"></script>
+    <script src="./js/cookies.js?v=20260916o"></script>
+    <script src="./js/prefs.js?v=20260916o"></script>
+    <script src="./js/mock-data.js?v=20260916o"></script>
+    <script src="./js/api.js?v=20260916o"></script>
+    <script src="./js/date-utils.js?v=20260916o"></script>
+    <script src="./js/filter-state.js?v=20260916o"></script>
+    <script src="./js/markdown-inline.js?v=20260916o"></script>
+    <script src="./js/hub-views.js?v=20260916o"></script>
+    <script src="./js/dashboard.js?v=20260916o"></script>
   </body>
 </html>

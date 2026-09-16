@@ -37,11 +37,6 @@
     brandMark: document.querySelector(".brand-mark"),
     subtitle: document.getElementById("subtitle"),
     refreshBtn: document.getElementById("refresh-btn"),
-    statusBtn: document.getElementById("status-btn"),
-    syncActions: document.getElementById("sync-actions"),
-    syncMenuBtn: document.getElementById("sync-menu-btn"),
-    syncMenu: document.getElementById("sync-menu"),
-    syncScanBtn: document.getElementById("sync-scan-btn"),
     authBtn: document.getElementById("auth-btn"),
     authEmptyState: document.getElementById("auth-empty-state"),
     authEmptyBtn: document.getElementById("auth-empty-btn"),
@@ -78,8 +73,8 @@
     tableWrap: document.getElementById("table-wrap"),
     itemsBody: document.getElementById("items-body"),
     filterAssignee: document.getElementById("filter-assignee"),
-    filterHideCompleted: document.getElementById("filter-hide-completed"),
-    filterHideCards: document.getElementById("filter-hide-cards"),
+    filterHideCompleted: document.getElementById("filter-show-completed"),
+    filterHideCards: document.getElementById("filter-show-member-cards"),
     filterShowUnassigned: document.getElementById("filter-show-unassigned"),
     stageHideCompleted: document.getElementById("stage-hide-completed"),
     stageHideCards: document.getElementById("stage-hide-cards"),
@@ -112,6 +107,12 @@
     welcomeStarterBlock: document.getElementById("welcome-starter-block"),
     welcomeStarter: document.getElementById("welcome-starter"),
     welcomeStarterLoad: document.getElementById("welcome-starter-load"),
+    welcomeQuickStart: document.getElementById("welcome-quick-start"),
+    welcomeBoardsBlock: document.getElementById("welcome-boards-block"),
+    welcomeBoardOptions: document.getElementById("welcome-board-options"),
+    welcomeBoardsEmpty: document.getElementById("welcome-boards-empty"),
+    welcomeBoardsAll: document.getElementById("welcome-boards-all"),
+    welcomeBoardsClear: document.getElementById("welcome-boards-clear"),
     welcomeLead: document.getElementById("welcome-lead"),
     welcomeHelpBtn: document.getElementById("welcome-help-btn"),
     scanNudge: document.getElementById("scan-nudge"),
@@ -221,6 +222,8 @@
     expandedCalDay: null,
     focusCalDayAfterRender: null,
     collapsedGroups: prefs.collapsedGroups || {},
+    /** After first list render for a grouping, stop re-defaulting missing ids. */
+    groupCollapseSeeded: false,
     loading: false,
     statusTimer: null,
     statusNudgeDismissedUntil: 0,
@@ -259,10 +262,11 @@
     els.filterReminders.checked = state.showReminders;
   }
   if (els.filterHideCompleted) {
-    els.filterHideCompleted.checked = state.hideCompleted;
+    // Checkbox means "show"; prefs still store hideCompleted.
+    els.filterHideCompleted.checked = !state.hideCompleted;
   }
   if (els.filterHideCards) {
-    els.filterHideCards.checked = state.hideCards;
+    els.filterHideCards.checked = !state.hideCards;
   }
   if (els.filterShowUnassigned) {
     els.filterShowUnassigned.checked = state.showUnassigned;
@@ -855,6 +859,16 @@
     });
   }
 
+  /** Compact relative span: 45m / 3h / 2d (absolute magnitude). */
+  function formatDueSpan(msAbs) {
+    var minutes = Math.max(1, Math.round(Math.abs(msAbs) / 60000));
+    if (minutes < 60) return minutes + "m";
+    var hours = Math.round(Math.abs(msAbs) / 3600000);
+    if (hours < 48) return hours + "h";
+    var days = Math.max(1, Math.round(Math.abs(msAbs) / 86400000));
+    return days + "d";
+  }
+
   function itemActualDue(item) {
     if (!item) return null;
     if (isReminderRow(item)) return item.sourceDue || item.due || null;
@@ -865,63 +879,55 @@
     if (!due) return "No date";
     var date = new Date(due);
     if (isNaN(date.getTime())) return "—";
-    if (stateValue === "complete") return formatDue(due);
     var now = new Date();
     var ts = date.getTime();
+    var delta = ts - now.getTime();
     var startToday = startOfDay(now).getTime();
     var endToday = endOfDay(now).getTime();
-    var hasTime = date.getHours() !== 0 || date.getMinutes() !== 0;
-    var time = date.toLocaleTimeString(undefined, {
-      hour: "numeric",
-      minute: "2-digit",
-    });
     var reminder = isReminderRow(item);
+
     if (reminder) {
       var actual = itemActualDue(item);
-      var actualLabel = actual ? formatDue(actual) : formatDue(due);
+      var actualLabel = actual
+        ? formatDueRelative(actual, stateValue, null)
+        : formatDueSpan(delta);
       var leadBit;
-      if (ts <= endToday) leadBit = "Reminded today";
-      else {
-        var nextWork = nextCalendarDay(now);
-        var nextStart = startOfDay(nextWork).getTime();
-        var nextEnd = endOfDay(nextWork).getTime();
-        if (ts >= nextStart && ts <= nextEnd) leadBit = "Reminded tomorrow";
-        else {
-          var daysOut = Math.round(
-            (startOfDay(date).getTime() - startToday) / 86400000
-          );
-          leadBit =
-            daysOut > 0 && daysOut < 7
-              ? "Reminded in " + daysOut + "d"
-              : "Reminder";
-        }
+      if (ts <= endToday && ts >= startToday) leadBit = "Reminded today";
+      else if (ts < startToday) {
+        leadBit = "Reminded " + formatDueSpan(now.getTime() - ts) + " ago";
+      } else {
+        leadBit = "Reminded in " + formatDueSpan(delta);
       }
-      return leadBit + " · item due " + actualLabel;
+      return leadBit + " · item " + actualLabel;
     }
-    if (ts < startToday) {
-      var days = Math.max(
-        1,
-        Math.round((startToday - startOfDay(date).getTime()) / 86400000)
-      );
-      return days === 1 ? "Overdue 1d" : "Overdue " + days + "d";
+
+    if (stateValue === "complete") {
+      if (delta < 0) return formatDueSpan(-delta) + " ago";
+      if (delta === 0) return "Now";
+      return "in " + formatDueSpan(delta);
     }
-    if (ts < now.getTime()) {
-      return hasTime ? "Overdue " + time : "Overdue today";
+
+    if (delta < 0) {
+      return "Overdue " + formatDueSpan(-delta) + " ago";
     }
-    if (ts <= endToday) return hasTime ? "Today " + time : "Today";
+    if (ts <= endToday) {
+      return delta < 60 * 60 * 1000
+        ? "Due in " + formatDueSpan(delta)
+        : "Today · in " + formatDueSpan(delta);
+    }
     var nextWorkday = nextCalendarDay(now);
     var nextStartTs = startOfDay(nextWorkday).getTime();
     var nextEndTs = endOfDay(nextWorkday).getTime();
     if (ts >= nextStartTs && ts <= nextEndTs) {
-      return hasTime ? "Tomorrow " + time : "Tomorrow";
+      return "Tomorrow · in " + formatDueSpan(delta);
     }
     var daysAhead = Math.round(
       (startOfDay(date).getTime() - startToday) / 86400000
     );
     if (daysAhead > 0 && daysAhead < 7) {
-      return hasTime ? "In " + daysAhead + "d · " + time : "In " + daysAhead + "d";
+      return "In " + formatDueSpan(delta);
     }
-    return formatDue(due);
+    return "In " + formatDueSpan(delta);
   }
 
   function viewOwnsTime(view) {
@@ -1299,6 +1305,7 @@
       });
     updateAllowlistSummary();
     updateAllowlistRescanNudge();
+    syncWelcomeBoardsFromFilters();
   }
 
   function populateAllowlistBoards(boards) {
@@ -1335,7 +1342,69 @@
       });
     }
     persistAllowlist();
+    syncWelcomeBoardsFromFilters();
     if (state.data) renderTable();
+  }
+
+  function syncWelcomeBoardsFromFilters() {
+    if (!els.welcomeBoardOptions) return;
+    var source = document.getElementById("filter-board-options");
+    var boards =
+      (state.boardCatalog && state.boardCatalog.boards) || [];
+    var checked = els.filterBoard ? getCheckedValues(els.filterBoard) : [];
+    els.welcomeBoardOptions.innerHTML = "";
+
+    var list = [];
+    if (source && source.querySelectorAll('input[type="checkbox"]').length) {
+      source.querySelectorAll('input[type="checkbox"]').forEach(function (input) {
+        list.push({
+          id: input.value,
+          name: input.getAttribute("data-label") || input.value,
+          checked: input.checked,
+        });
+      });
+    } else {
+      list = boards
+        .slice()
+        .sort(function (a, b) {
+          return String(a.name || "").localeCompare(String(b.name || ""));
+        })
+        .map(function (board) {
+          return {
+            id: board.id,
+            name: board.name,
+            checked: checked.indexOf(board.id) >= 0,
+          };
+        });
+    }
+
+    list.forEach(function (board) {
+      addOption(
+        els.welcomeBoardOptions,
+        board.id,
+        board.name,
+        Boolean(board.checked)
+      );
+    });
+
+    if (els.welcomeBoardsBlock) {
+      els.welcomeBoardsBlock.hidden = false;
+    }
+    if (els.welcomeBoardsEmpty) {
+      els.welcomeBoardsEmpty.hidden = list.length > 0;
+      els.welcomeBoardsEmpty.textContent = state.boardsReady
+        ? "No boards available."
+        : "Board names are still loading…";
+    }
+    updateWelcomeStarterLoadButton();
+  }
+
+  function applyWelcomeBoardSelection() {
+    if (!els.welcomeBoardOptions || !els.filterBoard) return;
+    var ids = getCheckedValues(els.welcomeBoardOptions);
+    setCheckedValues(els.filterBoard, ids);
+    persistAllowlist();
+    updateWelcomeStarterLoadButton();
   }
 
   function populateLabels(labels) {
@@ -1937,6 +2006,39 @@
     parent.appendChild(nameSpan);
   }
 
+  function assigneeInitials(name) {
+    var parts = String(name || "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean);
+    if (!parts.length) return "?";
+    if (parts.length === 1) {
+      return parts[0].slice(0, 2).toUpperCase();
+    }
+    return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+  }
+
+  function appendAssigneeChip(parent, item) {
+    var name = (item && item.assigneeName) || "";
+    if (!item || (!item.idMember && !name)) {
+      parent.textContent = "—";
+      return;
+    }
+    var chip = document.createElement("span");
+    chip.className = "assignee-chip";
+    var meId = viewerMemberId();
+    if (item.idMember && meId && item.idMember === meId) {
+      chip.classList.add("is-me");
+    } else {
+      chip.classList.add("is-other");
+    }
+    var label = name || "Assignee";
+    chip.textContent = assigneeInitials(label);
+    chip.title = label;
+    chip.setAttribute("aria-label", label);
+    parent.appendChild(chip);
+  }
+
   function createItemRow(item) {
     var tr = document.createElement("tr");
     var rowState = itemState(item);
@@ -2019,7 +2121,7 @@
 
     var assigneeTd = document.createElement("td");
     assigneeTd.className = "col-assignee";
-    assigneeTd.textContent = item.assigneeName || "—";
+    appendAssigneeChip(assigneeTd, item);
 
     var dueTd = document.createElement("td");
     dueTd.className = "col-due " + dueClass(item.due, rowState, item);
@@ -2709,15 +2811,30 @@
     var frag = document.createDocumentFragment();
     var groups = buildGroups(filtered);
     var showGroups = state.groupBy !== "none";
-    if (showGroups) {
-      var hidingEveryItem = groups.length > 0;
-      groups.forEach(function (group) {
-        if (!state.collapsedGroups[group.id]) hidingEveryItem = false;
-      });
-      if (hidingEveryItem) {
-        groups.forEach(function (group) {
-          state.collapsedGroups[group.id] = false;
+    if (showGroups && groups.length) {
+      var collapseTouched = false;
+      if (!state.groupCollapseSeeded) {
+        // First paint for this grouping: expand only the first group.
+        // Missing keys after prefs prune mean "expanded", so we must not
+        // re-apply this default on every render or expands get undone.
+        groups.forEach(function (group, index) {
+          if (state.collapsedGroups[group.id] === undefined) {
+            state.collapsedGroups[group.id] = index !== 0;
+            collapseTouched = true;
+          }
         });
+        state.groupCollapseSeeded = true;
+      }
+      var anyOpen = groups.some(function (group) {
+        return !state.collapsedGroups[group.id];
+      });
+      // Never leave every group collapsed (empty-looking list).
+      if (!anyOpen) {
+        state.collapsedGroups[groups[0].id] = false;
+        collapseTouched = true;
+      }
+      if (collapseTouched) {
+        savePrefs({ collapsedGroups: state.collapsedGroups });
       }
     }
     var appended = 0;
@@ -2994,7 +3111,7 @@
     els.welcomeStarter.innerHTML = "";
     var none = document.createElement("option");
     none.value = "";
-    none.textContent = "None — select boards yourself";
+    none.textContent = "None — pick boards below";
     els.welcomeStarter.appendChild(none);
 
     if (teams.length) {
@@ -3036,8 +3153,19 @@
     }
     els.welcomeStarter.value = hasPrefer ? preferValue : "";
 
+    if (els.welcomeQuickStart) {
+      els.welcomeQuickStart.hidden = !(teams.length || views.length);
+    }
+    syncWelcomeBoardsFromFilters();
     if (els.welcomeStarterBlock) {
-      els.welcomeStarterBlock.hidden = !(teams.length || views.length);
+      els.welcomeStarterBlock.hidden = !(
+        teams.length ||
+        views.length ||
+        state.boardsReady ||
+        (state.boardCatalog &&
+          state.boardCatalog.boards &&
+          state.boardCatalog.boards.length)
+      );
     }
     updateWelcomeStarterLoadButton();
   }
@@ -3196,15 +3324,17 @@
         : view.workType === "checkitem";
     state.showUnassigned = Boolean(view.showUnassigned);
     state.collapsedGroups = Object.assign({}, view.collapsedGroups || {});
+    state.groupCollapseSeeded =
+      Object.keys(state.collapsedGroups).length > 0;
     if (els.filterWorkType) els.filterWorkType.value = state.workType;
     if (els.filterReminders) {
       els.filterReminders.checked = state.showReminders;
     }
     if (els.filterHideCompleted) {
-      els.filterHideCompleted.checked = state.hideCompleted;
+      els.filterHideCompleted.checked = !state.hideCompleted;
     }
     if (els.filterHideCards) {
-      els.filterHideCards.checked = state.hideCards;
+      els.filterHideCards.checked = !state.hideCards;
     }
     if (els.filterShowUnassigned) {
       els.filterShowUnassigned.checked = state.showUnassigned;
@@ -3257,6 +3387,7 @@
     var next = Boolean(open);
     if (!els.configPanel) {
       state.filtersOpen = next;
+      updateAllowlistRescanNudge();
       return;
     }
     if (next) {
@@ -3269,7 +3400,6 @@
       closeApiUsageModal();
       closeGanttChecklistModal();
       closeShortcutsModal();
-      closeSyncMenu();
       closeViewMenu();
       if (els.configToggle) {
         els.configToggle.setAttribute("aria-expanded", "true");
@@ -3279,6 +3409,7 @@
         els.configPanel,
         els.configClose || els.configDone
       );
+      updateAllowlistRescanNudge();
       return;
     }
     if (!state.filtersOpen && els.configPanel.hidden) return;
@@ -3292,20 +3423,21 @@
       document.body.classList.remove("welcome-open");
       restoreModalFocus();
     }
+    updateAllowlistRescanNudge();
   }
 
   function updateFilterSummary() {
     if (!els.filterSummary) return;
     var filters = captureFilterState();
     var bits = [];
-    bits.push(state.hideCards ? "Tasks" : "Tasks + member-only cards");
+    bits.push(state.hideCards ? "Tasks" : "Tasks + member cards");
 
     var assignees = getCheckedValues(els.filterAssignee);
     if (assignees.length === 1 && assignees[0] === "me") bits.push("Me");
     else if (assignees.length) bits.push(assignees.length + " assignees");
 
-    if (state.hideCompleted && viewUsesHideCompleted(state.view)) {
-      bits.push("Open");
+    if (!state.hideCompleted && viewUsesHideCompleted(state.view)) {
+      bits.push("Completed");
     }
     if (state.showUnassigned) {
       bits.push("Unassigned");
@@ -3368,9 +3500,7 @@
       if (els.insightWrap) els.insightWrap.hidden = true;
       if (els.insightWrap) els.insightWrap.hidden = true;
       if (els.refreshBtn) els.refreshBtn.hidden = true;
-      if (els.syncActions) els.syncActions.hidden = true;
       stopStatusNudgeWatch();
-      closeSyncMenu();
       closeViewMenu();
     } else {
       populateSavedViews();
@@ -3381,47 +3511,26 @@
     }
   }
 
-  function closeSyncMenu() {
-    if (!els.syncMenu || !els.syncMenuBtn) return;
-    els.syncMenu.hidden = true;
-    els.syncMenuBtn.setAttribute("aria-expanded", "false");
-    if (els.syncActions) els.syncActions.classList.remove("is-open");
-  }
-
   function syncActionButtons() {
     var ready = Boolean(state.token) && !state.loading;
     var hasData = Boolean(state.data);
 
     if (els.refreshBtn) {
-      // Standalone primary action before the first successful load.
-      els.refreshBtn.hidden = !ready || hasData;
-      els.refreshBtn.disabled = !ready || hasData;
+      els.refreshBtn.hidden = !ready;
+      els.refreshBtn.disabled = !ready;
       var label = els.refreshBtn.querySelector(".btn-label");
       var icon = els.refreshBtn.querySelector(".material-symbols-outlined");
-      if (label) label.textContent = "View checklists";
-      if (icon) icon.textContent = "radar";
-      els.refreshBtn.title =
-        "Collect checklist work from the selected boards";
-    }
-
-    if (els.syncActions) {
-      // One Refresh action with a full-rescan option after the first scan.
-      els.syncActions.hidden = !ready || !hasData;
-    }
-
-    if (els.statusBtn) {
-      els.statusBtn.disabled = !ready || !hasData;
-      els.statusBtn.title = hasData
-        ? "Refresh current work and add any newly selected boards"
-        : "View checklists first, then Refresh can check current items";
-    }
-
-    if (els.syncMenuBtn) {
-      els.syncMenuBtn.disabled = !ready || !hasData;
-    }
-
-    if (els.syncScanBtn) {
-      els.syncScanBtn.disabled = !ready;
+      if (hasData) {
+        if (label) label.textContent = "Refresh";
+        if (icon) icon.textContent = "sync";
+        els.refreshBtn.title =
+          "Reload checklist work from all selected boards";
+      } else {
+        if (label) label.textContent = "View checklists";
+        if (icon) icon.textContent = "radar";
+        els.refreshBtn.title =
+          "Collect checklist work from the selected boards";
+      }
     }
 
     if (els.exportBtn) {
@@ -3431,13 +3540,10 @@
     if (els.copyListBtn) {
       els.copyListBtn.hidden = !ready || !hasData;
     }
-
-    if (!hasData) closeSyncMenu();
   }
 
   function runScan(options) {
     var opts = options || {};
-    closeSyncMenu();
     closeWelcomeModal({ persist: true, skipSession: true });
     closeScanConfirm();
     if (!state.boardsReady && !opts.forceFull && !opts.boardListOnly) {
@@ -3469,7 +3575,6 @@
     closeScanConfirm();
     closeLoadBlockedModal();
     closeWelcomeModal({ persist: true, skipSession: true });
-    closeSyncMenu();
     if (!retried && boardListInFlight && !state.boardsReady) {
       return boardListInFlight.then(function () {
         return beginScan(true);
@@ -3631,7 +3736,7 @@
           setScanProgress(1, 1, "Done", "catalog");
           if (listOpts.refreshOnly && state.data) {
             showBanner(
-              "Board names refreshed. Your work is unchanged until you rescan selected boards.",
+              "Board names refreshed. Your work is unchanged until you refresh selected boards.",
               "info",
               { dismissible: true, bannerKind: "board-pick" }
             );
@@ -3670,6 +3775,16 @@
     return missing;
   }
 
+  function maybeLoadBoardsAfterFilters() {
+    if (!getAllowlistBoardIds().length) return Promise.resolve();
+    if (!state.data) {
+      return runScan({ skipConfirm: true, forceFull: true });
+    }
+    var missing = boardsMissingFromScan();
+    if (!missing.length) return Promise.resolve();
+    return loadMissingBoards(missing);
+  }
+
   function updateAllowlistRescanNudge() {
     if (!state.data) {
       state.allowlistRescanNeeded = false;
@@ -3687,19 +3802,24 @@
     state.allowlistRescanNeeded = missing.length > 0;
     if (state.allowlistRescanNeeded) {
       var missingCount = missing.length;
+      // Refresh loads newly selected boards with the rest of the allowlist.
+      var how = state.filtersOpen
+        ? missingCount === 1
+          ? "Press Done to load it."
+          : "Press Done to load them."
+        : missingCount === 1
+          ? "Press Refresh to load it."
+          : "Press Refresh to load them.";
       showBanner(
         missingCount +
-          (missingCount === 1 ? " selected board is" : " selected boards are") +
-          " not loaded yet.",
+          (missingCount === 1
+            ? " selected board is not loaded yet. "
+            : " selected boards are not loaded yet. ") +
+          how,
         "info",
         {
           dismissible: true,
           bannerKind: "allowlist-rescan",
-          actionLabel:
-            missingCount === 1 ? "Add that board" : "Add those boards",
-          action: function () {
-            loadMissingBoards();
-          },
         }
       );
     } else if (
@@ -3827,8 +3947,8 @@
     els.scanNudge.hidden = age < nudgeAfter;
     if (!els.scanNudge.hidden) {
       setScanNudge(
-        "Check for new tasks",
-        "Rescan selected boards for work assigned since the last refresh."
+        "Refresh selected boards",
+        "Reload checklist work from all selected boards."
       );
     }
   }
@@ -3899,8 +4019,8 @@
         note.hidden = false;
         note.textContent =
           scope === "myday"
-            ? "Review Upcoming or Undated work, or rescan selected boards."
-            : "Try another due filter, widen filters, or rescan selected boards.";
+            ? "Review Upcoming or Undated work, or refresh selected boards."
+            : "Try another due filter, widen filters, or refresh selected boards.";
       }
     }
   }
@@ -4586,7 +4706,6 @@
 
     state.loading = true;
     syncActionButtons();
-    closeSyncMenu();
     clearNonPrivacyBanner();
     state.scanAbort =
       typeof AbortController !== "undefined" ? new AbortController() : null;
@@ -4836,7 +4955,7 @@
           return;
         }
         if (handleAuthorizationError(err)) return;
-        showErrorBanner(err, "Rescan selected boards");
+        showErrorBanner(err, "Refresh selected boards");
         els.subtitle.textContent = "Something went wrong";
       })
       .finally(finish);
@@ -4889,7 +5008,13 @@
   function syncWelcomeTeamsUi() {
     var hasTeams = state.teams && state.teams.length > 0;
     var hasViews = prefsApi.loadViews().length > 0;
-    var showStarter = hasTeams || hasViews;
+    var hasBoardCatalog = Boolean(
+      (state.boardCatalog &&
+        state.boardCatalog.boards &&
+        state.boardCatalog.boards.length) ||
+        state.boardsReady
+    );
+    var showStarter = hasTeams || hasViews || hasBoardCatalog;
     populateWelcomeStarter();
     if (els.welcomeStarterBlock) {
       els.welcomeStarterBlock.hidden = !showStarter;
@@ -4897,23 +5022,23 @@
     if (els.welcomeLead) {
       if (state.demo && !state.boardsReady) {
         els.welcomeLead.textContent = showStarter
-          ? "Listing boards… Use Quick start for a team, or select boards yourself."
+          ? "Listing boards… Pick a team or tick boards below when they appear."
           : "Listing sample boards… then select the boards you need.";
       } else if (state.demo) {
         els.welcomeLead.textContent = showStarter
-          ? "Use Quick start, or select boards yourself. Sample data only."
+          ? "Pick a team or tick boards below, then view checklists. Sample data only."
           : "Select boards under Filters, then view checklists. Sample data only.";
       } else if (!state.boardsReady) {
         if (showStarter) {
           els.welcomeLead.textContent =
-            "Listing boards… Use Quick start for a team or saved view, or select boards yourself.";
+            "Listing boards… Pick a team or tick boards below when they appear.";
         } else {
           els.welcomeLead.textContent =
             "Listing available boards… then select the boards you need.";
         }
       } else if (showStarter) {
         els.welcomeLead.textContent =
-          "Use Quick start, or select boards yourself, then view checklists.";
+          "Pick a team, saved view, or tick boards below, then view checklists.";
       } else {
         els.welcomeLead.textContent =
           "Select boards under Filters, then view checklists.";
@@ -5491,46 +5616,9 @@
   }
 
   els.refreshBtn.addEventListener("click", function () {
-    runScan();
+    // Always reload selected boards (cheaper than per-card refresh at scale).
+    runScan({ skipConfirm: Boolean(state.data), forceFull: true });
   });
-
-  if (els.statusBtn) {
-    els.statusBtn.addEventListener("click", function () {
-      if (boardsMissingFromScan().length) {
-        loadMissingBoards();
-        return;
-      }
-      loadStatus(false);
-    });
-  }
-
-  if (els.syncMenuBtn) {
-    els.syncMenuBtn.addEventListener("click", function (event) {
-      event.stopPropagation();
-      if (!els.syncMenu || els.syncMenuBtn.disabled) return;
-      var willOpen = els.syncMenu.hidden;
-      closeAllMultiSelects();
-      if (willOpen) {
-        els.syncMenu.hidden = false;
-        els.syncMenuBtn.setAttribute("aria-expanded", "true");
-        if (els.syncActions) els.syncActions.classList.add("is-open");
-      } else {
-        closeSyncMenu();
-      }
-    });
-  }
-
-  if (els.syncScanBtn) {
-    els.syncScanBtn.addEventListener("click", function () {
-      runScan();
-    });
-  }
-
-  if (els.syncMenu) {
-    els.syncMenu.addEventListener("click", function (event) {
-      event.stopPropagation();
-    });
-  }
 
   document.addEventListener("visibilitychange", function () {
     if (!document.hidden) updateStatusNudge();
@@ -5608,7 +5696,7 @@
 
   if (els.filterHideCompleted) {
     els.filterHideCompleted.addEventListener("change", function () {
-      state.hideCompleted = Boolean(els.filterHideCompleted.checked);
+      state.hideCompleted = !els.filterHideCompleted.checked;
       savePrefs({ hideCompleted: state.hideCompleted });
       renderTable();
     });
@@ -5616,7 +5704,7 @@
 
   if (els.filterHideCards) {
     els.filterHideCards.addEventListener("change", function () {
-      state.hideCards = Boolean(els.filterHideCards.checked);
+      state.hideCards = !els.filterHideCards.checked;
       savePrefs({ hideCards: state.hideCards });
       renderTable();
     });
@@ -5724,11 +5812,7 @@
   if (els.statusRefreshBtn) {
     els.statusRefreshBtn.addEventListener("click", function () {
       hideStatusRefreshBanner();
-      if (boardsMissingFromScan().length) {
-        loadMissingBoards();
-        return;
-      }
-      loadStatus(false);
+      runScan({ skipConfirm: true, forceFull: true });
     });
   }
 
@@ -5776,6 +5860,7 @@
         clearWelcomeStarterExtras();
         if (els.filterTeam) els.filterTeam.value = parsed.id;
         applySelectedTeam(parsed.id).then(function () {
+          syncWelcomeBoardsFromFilters();
           updateWelcomeStarterLoadButton();
         });
         return;
@@ -5786,8 +5871,51 @@
         state.pendingViewId = parsed.id;
         state.applyDefaultViewPending = false;
         applyViewBoardPicks(findSavedView(parsed.id));
+        syncWelcomeBoardsFromFilters();
         updateWelcomeStarterLoadButton();
       }
+    });
+  }
+
+  if (els.welcomeBoardOptions) {
+    els.welcomeBoardOptions.addEventListener("change", function (event) {
+      if (!event.target || event.target.type !== "checkbox") return;
+      // Manual board picks clear a team quick-start selection.
+      if (els.welcomeStarter && els.welcomeStarter.value.indexOf("team:") === 0) {
+        els.welcomeStarter.value = "";
+        state.selectedTeamId = "";
+        if (els.filterTeam) els.filterTeam.value = "";
+        clearWelcomeStarterExtras();
+      }
+      applyWelcomeBoardSelection();
+    });
+  }
+
+  if (els.welcomeBoardsAll) {
+    els.welcomeBoardsAll.addEventListener("click", function () {
+      if (!els.welcomeBoardOptions) return;
+      els.welcomeBoardOptions
+        .querySelectorAll('input[type="checkbox"]')
+        .forEach(function (input) {
+          input.checked = true;
+        });
+      if (els.welcomeStarter) els.welcomeStarter.value = "";
+      state.selectedTeamId = "";
+      if (els.filterTeam) els.filterTeam.value = "";
+      clearWelcomeStarterExtras();
+      applyWelcomeBoardSelection();
+    });
+  }
+
+  if (els.welcomeBoardsClear) {
+    els.welcomeBoardsClear.addEventListener("click", function () {
+      if (!els.welcomeBoardOptions) return;
+      els.welcomeBoardOptions
+        .querySelectorAll('input[type="checkbox"]')
+        .forEach(function (input) {
+          input.checked = false;
+        });
+      applyWelcomeBoardSelection();
     });
   }
 
@@ -5797,11 +5925,23 @@
         els.welcomeStarter && els.welcomeStarter.value
       );
       if (parsed.kind === "none") {
-        showBanner(
-          "Choose a team or saved view, or close this and select boards under Filters.",
-          "warn",
-          { dismissible: true, bannerKind: "load-blocked" }
-        );
+        applyWelcomeBoardSelection();
+        if (!getAllowlistBoardIds().length) {
+          showBanner(
+            "Tick at least one board below, or choose a team / saved view.",
+            "warn",
+            { dismissible: true, bannerKind: "load-blocked" }
+          );
+          return;
+        }
+        closeWelcomeModal({ skipSession: true });
+        var goBoards = function () {
+          runScan({ skipConfirm: !state.data, forceFull: true });
+        };
+        if (!state.boardsReady || boardListInFlight) {
+          return loadBoardList({ silent: true }).then(goBoards);
+        }
+        goBoards();
         return;
       }
 
@@ -5869,7 +6009,7 @@
         loadMissingBoards();
         return;
       }
-      runScan();
+      runScan({ skipConfirm: true, forceFull: true });
     });
   }
 
@@ -6059,8 +6199,14 @@
   if (els.filterGroup) {
     els.filterGroup.addEventListener("change", function () {
       state.groupBy = els.filterGroup.value;
+      // Fresh grouping → expand only the first group again.
+      state.collapsedGroups = {};
+      state.groupCollapseSeeded = false;
       resetGroupVisibleCounts();
-      savePrefs({ groupBy: state.groupBy });
+      savePrefs({
+        groupBy: state.groupBy,
+        collapsedGroups: state.collapsedGroups,
+      });
       renderTable();
     });
   }
@@ -6094,6 +6240,7 @@
     els.configDone.addEventListener("click", function () {
       setConfigOpen(false);
       if (els.configToggle) els.configToggle.focus();
+      maybeLoadBoardsAfterFilters();
     });
   }
 
@@ -6123,7 +6270,6 @@
   if (els.viewMenuBtn && els.viewMenu) {
     els.viewMenuBtn.addEventListener("click", function (event) {
       event.stopPropagation();
-      closeSyncMenu();
       closeAllMultiSelects();
       var willOpen = els.viewMenu.hidden;
       closeViewMenu();
@@ -6439,7 +6585,10 @@
     },
   });
   wireMultiSelect(els.filterBoard, {
-    onChange: persistAllowlist,
+    onChange: function () {
+      persistAllowlist();
+      syncWelcomeBoardsFromFilters();
+    },
     onChangeSummary: updateAllowlistSummary,
   });
   wireMultiSelect(els.filterLabel, {
@@ -6471,7 +6620,6 @@
 
   document.addEventListener("click", function () {
     closeAllMultiSelects();
-    closeSyncMenu();
     closeViewMenu();
   });
 
@@ -6580,12 +6728,6 @@
       }
       if (els.welcomeModal && !els.welcomeModal.hidden) {
         closeWelcomeModal({ persist: true });
-        event.preventDefault();
-        return;
-      }
-      if (els.syncMenu && !els.syncMenu.hidden) {
-        closeSyncMenu();
-        if (els.syncMenuBtn) els.syncMenuBtn.focus();
         event.preventDefault();
         return;
       }

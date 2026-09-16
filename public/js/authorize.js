@@ -71,7 +71,7 @@
           url: "./dashboard.html",
           fullscreen: true,
           title: "Checklist Hub",
-          accentColor: "#6BBBAE",
+          accentColor: "#12C4B0",
         });
       })
       .catch(function (err) {

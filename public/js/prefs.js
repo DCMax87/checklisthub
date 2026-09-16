@@ -41,9 +41,11 @@
       defaultViewId: "",
       showReminders: false,
       hideCompleted: true,
-      hideCards: false,
+      hideCards: true,
       showUnassigned: false,
       calendarMode: "month",
+      /** One-time: Member Only Cards default flipped to off. */
+      memberCardsDefaultOff: true,
     };
   }
 
@@ -56,6 +58,11 @@
       prefs.calendarMode = "week";
     }
     if (prefs.calendarMode !== "week") prefs.calendarMode = "month";
+    // Apply new default once for existing cookies that still had member cards on.
+    if (stored && !stored.memberCardsDefaultOff) {
+      prefs.hideCards = true;
+      prefs.memberCardsDefaultOff = true;
+    }
     return prefs;
   }
 
@@ -82,6 +89,7 @@
       hideCards: Boolean(next.hideCards),
       showUnassigned: Boolean(next.showUnassigned),
       calendarMode: next.calendarMode === "week" ? "week" : "month",
+      memberCardsDefaultOff: true,
     };
     cookies.writeJson(PREFS_COOKIE, safe, 180);
     return safe;
