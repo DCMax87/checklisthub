@@ -666,13 +666,32 @@
     if (!err || (err.status !== 401 && err.status !== 403)) return false;
     state.token = null;
     state.data = null;
+    state.boardsReady = false;
+    state.boardCatalog = null;
     if (api && api.clearCache) api.clearCache();
     setUiAuthorized(false);
     els.subtitle.textContent = "Trello access expired · authorize again";
+    // Drop the stale plugin token so the board button opens authorize.html next time.
+    getRestApiClient()
+      .then(function (rest) {
+        if (rest && typeof rest.clearToken === "function") {
+          return rest.clearToken();
+        }
+        return null;
+      })
+      .catch(function () {
+        // Ignore — UI already shows Authorize.
+      });
     showBanner(
       "Your Trello access has expired or was revoked. Authorize again to continue.",
       "warn",
-      { dismissible: false }
+      {
+        dismissible: false,
+        actionLabel: "Authorize",
+        action: function () {
+          authorizeHub();
+        },
+      }
     );
     return true;
   }
@@ -3555,6 +3574,7 @@
             showBanner("Cancelled.", "info", { dismissible: true });
             return;
           }
+          if (handleAuthorizationError(err)) return;
           showErrorBanner(err, "Board list");
           els.subtitle.textContent = "Could not list board names";
         });
@@ -4946,6 +4966,7 @@
         if (state.data) renderTable();
       })
       .catch(function (err) {
+        if (handleAuthorizationError(err)) return;
         showErrorBanner(err, "Resolve team boards");
       });
   }
@@ -5004,9 +5025,9 @@
         state.teams = [];
         populateTeamsSelect([]);
         state.teamsContextNote = "Could not load teams from this board.";
-        if (err && err.name !== "AbortError") {
-          showErrorBanner(err, "Load teams");
-        }
+        if (err && err.name === "AbortError") return;
+        if (handleAuthorizationError(err)) return;
+        showErrorBanner(err, "Load teams");
       });
   }
 
