@@ -2143,6 +2143,39 @@ body.theme-dark .assignee-chip.is-other {
   animation: hub-spin 0.8s linear infinite;
 }
 
+.link-refresh-queued {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.75rem;
+  padding: 0.1rem 0.25rem;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  color: var(--muted);
+  background: var(--bg-soft);
+  line-height: 1.2;
+  cursor: default;
+  user-select: none;
+}
+
+.link-refresh-queued.is-soon {
+  min-width: auto;
+  padding: 0.15rem;
+  background: transparent;
+}
+
+.link-refresh-queued.is-soon .material-symbols-outlined {
+  font-size: 1.05rem;
+  color: var(--muted);
+  animation: hub-spin 0.8s linear infinite;
+}
+
+.hub-row.is-refresh-queued td:first-child {
+  box-shadow: inset 3px 0 0 rgba(var(--accent-rgb), 0.85);
+}
+
 @keyframes hub-spin {
   to {
     transform: rotate(360deg);

@@ -243,9 +243,10 @@
     refreshingBoardId: null,
     /**
      * Debounced Open→board refresh: boardId →
-     * { timerId, boardName, followUp }.
+     * { timerId, boardName, followUp, dueAt }.
      */
     pendingBoardRefreshes: {},
+    pendingRefreshTicker: null,
     pendingViewId: "",
     teams: [],
     selectedTeamId: "",
@@ -254,6 +255,8 @@
     teamsContextNote: "",
     selectedRowId: "",
     visibleItems: [],
+    /** Last list order (item id → index) for stable refresh reordering. */
+    listOrderIndex: {},
   };
 
   if (els.filterGroup) {
@@ -1755,6 +1758,18 @@
     });
   }
 
+  function clearListOrderMemory() {
+    state.listOrderIndex = {};
+  }
+
+  function rememberListOrder(items) {
+    var index = {};
+    (items || []).forEach(function (item, i) {
+      if (item && item.id != null) index[String(item.id)] = i;
+    });
+    state.listOrderIndex = index;
+  }
+
   function compareItems(a, b) {
     var key = state.sortKey;
     var av = a[key];
@@ -1777,6 +1792,13 @@
     var aRem = isReminderRow(a);
     var bRem = isReminderRow(b);
     if (aRem !== bRem) return aRem ? 1 : -1;
+    // Keep prior on-screen order across refreshes unless the sort key moved them.
+    var order = state.listOrderIndex || {};
+    var ai = order[String(a.id)];
+    var bi = order[String(b.id)];
+    if (ai != null && bi != null && ai !== bi) return ai - bi;
+    if (ai != null && bi == null) return -1;
+    if (ai == null && bi != null) return 1;
     return (a.name || "").localeCompare(b.name || "");
   }
 
@@ -2160,30 +2182,57 @@
     linkActions.className = "link-actions";
 
     if (item.boardId) {
-      var refreshBtn = document.createElement("button");
-      refreshBtn.type = "button";
-      refreshBtn.className = "link-refresh";
-      refreshBtn.title =
-        "Refresh this board (" + (item.boardName || "board") + ")";
-      refreshBtn.setAttribute(
-        "aria-label",
-        "Refresh board " + (item.boardName || "")
-      );
-      refreshBtn.appendChild(materialIcon("sync"));
-      var boardBusy =
-        state.loading ||
-        (state.refreshingBoardId &&
-          state.refreshingBoardId === item.boardId);
-      refreshBtn.disabled = Boolean(boardBusy);
-      if (boardBusy && state.refreshingBoardId === item.boardId) {
-        refreshBtn.classList.add("is-busy");
+      var pending = getPendingBoardRefresh(item.boardId);
+      var boardRefreshing =
+        state.refreshingBoardId &&
+        state.refreshingBoardId === item.boardId;
+      if (pending && pending.timerId && pending.dueAt && !boardRefreshing) {
+        var queued = document.createElement("span");
+        queued.className = "link-refresh-queued";
+        queued.setAttribute("data-queued-board", String(item.boardId));
+        queued.setAttribute(
+          "aria-label",
+          "Board refresh queued for " + (item.boardName || "board")
+        );
+        queued.title =
+          "Refresh queued for " +
+          (item.boardName || "this board") +
+          " — opens reset the timer";
+        queued.textContent = formatQueueCountdown(pending.dueAt);
+        linkActions.appendChild(queued);
+        tr.classList.add("is-refresh-queued");
+      } else if (pending && pending.followUp && !boardRefreshing) {
+        var soon = document.createElement("span");
+        soon.className = "link-refresh-queued is-soon";
+        soon.setAttribute("data-queued-board", String(item.boardId));
+        soon.title = "Board refresh waiting to start…";
+        soon.setAttribute("aria-label", "Board refresh waiting to start");
+        soon.appendChild(materialIcon("sync"));
+        linkActions.appendChild(soon);
+        tr.classList.add("is-refresh-queued");
+      } else {
+        var refreshBtn = document.createElement("button");
+        refreshBtn.type = "button";
+        refreshBtn.className = "link-refresh";
+        refreshBtn.title =
+          "Refresh this board (" + (item.boardName || "board") + ")";
+        refreshBtn.setAttribute(
+          "aria-label",
+          "Refresh board " + (item.boardName || "")
+        );
+        refreshBtn.appendChild(materialIcon("sync"));
+        var boardBusy = state.loading || boardRefreshing;
+        refreshBtn.disabled = Boolean(boardBusy);
+        if (boardBusy && boardRefreshing) {
+          refreshBtn.classList.add("is-busy");
+        }
+        refreshBtn.addEventListener("click", function (event) {
+          event.preventDefault();
+          event.stopPropagation();
+          refreshOneBoard(item.boardId, item.boardName);
+        });
+        linkActions.appendChild(refreshBtn);
       }
-      refreshBtn.addEventListener("click", function (event) {
-        event.preventDefault();
-        event.stopPropagation();
-        refreshOneBoard(item.boardId, item.boardName);
-      });
-      linkActions.appendChild(refreshBtn);
     }
 
     if (item.cardUrl) {
@@ -2788,6 +2837,7 @@
       })
       .sort(compareItems);
     state.visibleItems = filtered;
+    rememberListOrder(filtered);
 
     var counted = filtered.filter(function (item) {
       if (!viewUsesReminders(state.view) && isReminderRow(item)) return false;
@@ -2875,14 +2925,6 @@
         });
         state.groupCollapseSeeded = true;
       }
-      var anyOpen = groups.some(function (group) {
-        return !state.collapsedGroups[group.id];
-      });
-      // Never leave every group collapsed (empty-looking list).
-      if (!anyOpen) {
-        state.collapsedGroups[groups[0].id] = false;
-        collapseTouched = true;
-      }
       if (collapseTouched) {
         savePrefs({ collapsedGroups: state.collapsedGroups });
       }
@@ -2941,7 +2983,9 @@
         btn.appendChild(label);
         btn.appendChild(count);
         btn.addEventListener("click", function () {
-          state.collapsedGroups[group.id] = !state.collapsedGroups[group.id];
+          state.collapsedGroups[group.id] = !Boolean(
+            state.collapsedGroups[group.id]
+          );
           savePrefs({ collapsedGroups: state.collapsedGroups });
           renderViews();
         });
@@ -3028,6 +3072,7 @@
       appendItemTitle: appendItemTitle,
       plainItemTitle: plainItemTitle,
       appendLinkedItemTitle: appendLinkedItemTitle,
+      listOrderIndex: state.listOrderIndex,
       onSelect: function (id) {
         state.selectedRowId = id;
         highlightSelectedRow();
@@ -3355,6 +3400,7 @@
 
   function applySavedView(view) {
     if (!view) return;
+    clearListOrderMemory();
     state.workType = view.workType || "both";
     state.groupBy = view.groupBy || "due";
     state.view = view.view || "list";
@@ -4841,6 +4887,57 @@
     return ms;
   }
 
+  function getPendingBoardRefresh(boardId) {
+    var id = boardId && String(boardId);
+    if (!id) return null;
+    return state.pendingBoardRefreshes[id] || null;
+  }
+
+  function formatQueueCountdown(dueAt) {
+    var ms = Math.max(0, Number(dueAt) - Date.now());
+    var s = Math.ceil(ms / 1000);
+    if (s >= 60) {
+      var m = Math.floor(s / 60);
+      var r = s % 60;
+      return m + ":" + (r < 10 ? "0" : "") + r;
+    }
+    return s + "s";
+  }
+
+  function updateQueuedRefreshIndicators() {
+    var pending = state.pendingBoardRefreshes || {};
+    var anyTimer = Object.keys(pending).some(function (id) {
+      var entry = pending[id];
+      return Boolean(entry && entry.timerId && entry.dueAt);
+    });
+    if (!anyTimer) {
+      stopPendingRefreshTicker();
+      return;
+    }
+    var nodes = document.querySelectorAll(
+      ".link-refresh-queued[data-queued-board]"
+    );
+    Array.prototype.forEach.call(nodes, function (node) {
+      var id = node.getAttribute("data-queued-board");
+      var entry = getPendingBoardRefresh(id);
+      if (!entry || !entry.dueAt || !entry.timerId) return;
+      if (node.classList.contains("is-soon")) return;
+      node.textContent = formatQueueCountdown(entry.dueAt);
+    });
+  }
+
+  function stopPendingRefreshTicker() {
+    if (state.pendingRefreshTicker) {
+      clearInterval(state.pendingRefreshTicker);
+      state.pendingRefreshTicker = null;
+    }
+  }
+
+  function ensurePendingRefreshTicker() {
+    if (state.pendingRefreshTicker) return;
+    state.pendingRefreshTicker = setInterval(updateQueuedRefreshIndicators, 1000);
+  }
+
   function clearPendingBoardRefresh(boardId) {
     var id = boardId && String(boardId);
     if (!id || !state.pendingBoardRefreshes) return;
@@ -4856,6 +4953,7 @@
       clearPendingBoardRefresh(id);
     });
     state.pendingBoardRefreshes = {};
+    stopPendingRefreshTicker();
   }
 
   /**
@@ -4870,19 +4968,23 @@
     var prev = state.pendingBoardRefreshes[id];
     if (prev && prev.timerId) clearTimeout(prev.timerId);
 
-    var label =
-      boardName || (prev && prev.boardName) || "board";
+    var label = boardName || (prev && prev.boardName) || "board";
+    var dueAt = Date.now() + delay;
     var timerId = setTimeout(function () {
       var entry = state.pendingBoardRefreshes[id];
       delete state.pendingBoardRefreshes[id];
       runScheduledBoardRefresh(id, (entry && entry.boardName) || label);
+      renderTable();
     }, delay);
 
     state.pendingBoardRefreshes[id] = {
       timerId: timerId,
       boardName: label,
       followUp: false,
+      dueAt: dueAt,
     };
+    ensurePendingRefreshTicker();
+    renderTable();
   }
 
   function runScheduledBoardRefresh(boardId, boardName) {
@@ -4906,11 +5008,18 @@
       existing.boardName = boardName || existing.boardName || "board";
       return;
     }
+    var changed =
+      !existing ||
+      !existing.followUp ||
+      existing.boardName !==
+        (boardName || (existing && existing.boardName) || "board");
     state.pendingBoardRefreshes[id] = {
       timerId: null,
       boardName: boardName || (existing && existing.boardName) || "board",
       followUp: true,
+      dueAt: null,
     };
+    if (changed) renderTable();
   }
 
   function flushScheduledBoardRefreshes() {
@@ -6474,6 +6583,7 @@
       state.collapsedGroups = {};
       state.groupCollapseSeeded = false;
       resetGroupVisibleCounts();
+      clearListOrderMemory();
       savePrefs({
         groupBy: state.groupBy,
         collapsedGroups: state.collapsedGroups,
@@ -7106,6 +7216,7 @@
       state.sortKey = key;
       state.sortDir = "asc";
     }
+    clearListOrderMemory();
     savePrefs({ sortKey: state.sortKey, sortDir: state.sortDir });
     syncSortHeaders();
     renderTable();

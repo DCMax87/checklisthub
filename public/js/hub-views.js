@@ -16,10 +16,16 @@
     return node;
   }
 
-  function byDue(a, b) {
+  function byDue(a, b, host) {
     var av = a.due ? new Date(a.due).getTime() : Number.POSITIVE_INFINITY;
     var bv = b.due ? new Date(b.due).getTime() : Number.POSITIVE_INFINITY;
     if (av !== bv) return av - bv;
+    var order = (host && host.listOrderIndex) || {};
+    var ai = order[String(a.id)];
+    var bi = order[String(b.id)];
+    if (ai != null && bi != null && ai !== bi) return ai - bi;
+    if (ai != null && bi == null) return -1;
+    if (ai == null && bi != null) return 1;
     return String(a.name || "").localeCompare(String(b.name || ""));
   }
 
@@ -147,7 +153,9 @@
     }
 
     sections.forEach(function (section) {
-      var rows = buckets[section.id].slice().sort(byDue);
+      var rows = buckets[section.id].slice().sort(function (a, b) {
+        return byDue(a, b, host);
+      });
       if (!rows.length) return;
       var block = el("section", "insight-section agenda-section is-" + section.tone);
       var headingId = "agenda-heading-" + section.id;
@@ -500,7 +508,7 @@
     };
   }
 
-  function buildGanttTree(pool) {
+  function buildGanttTree(pool, host) {
     var boards = {};
     var boardOrder = [];
     pool.forEach(function (item) {
@@ -572,7 +580,9 @@
         var checklists = card.checklistOrder
           .map(function (checklistId) {
             var checklist = card.checklists[checklistId];
-            checklist.items.sort(byDue);
+            checklist.items.sort(function (a, b) {
+              return byDue(a, b, host);
+            });
             var checklistSpan = mergeSpans(checklist.spans);
             // Only draw rows that have at least one dated item.
             if (!checklistSpan) return null;
@@ -636,7 +646,7 @@
       }
       pool.push(item);
     });
-    var tree = buildGanttTree(pool);
+    var tree = buildGanttTree(pool, host);
     var hasBars = tree.some(function (board) {
       return board.span || board.cards.some(function (c) {
         return c.span || c.checklists.length;
