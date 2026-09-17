@@ -17,7 +17,7 @@ window.CHECKLIST_HUB_CONFIG = {
   /** Alternate support link (docs, issues). Optional. */
   supportUrl: "",
   /** Display version in the hub footer. */
-  appVersion: "1.1.5",
+  appVersion: "1.1.7",
   /** After this age, suggest a full selected-board rescan for new work. */
   rescanNudgeMs: 15 * 60 * 1000,
   /**
@@ -30,6 +30,11 @@ window.CHECKLIST_HUB_CONFIG = {
    * 0 disables the nudge.
    */
   statusNudgeMs: 5 * 60 * 1000,
+  /**
+   * After Open card, wait this long then refresh that card's board (debounced
+   * per board). 0 disables. Re-opening the same board resets the timer.
+   */
+  openBoardRefreshMs: 60 * 1000,
   /**
    * Trello OAuth token lifetime: "1hour" | "1day" | "30days" | "never".
    * Prefer a finite value for public installs; users can re-authorize when it expires.

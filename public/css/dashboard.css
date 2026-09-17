@@ -2104,6 +2104,51 @@ body.theme-dark .assignee-chip.is-other {
   font-size: 1.05em;
 }
 
+.link-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.link-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0.15rem;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.link-refresh .material-symbols-outlined {
+  font-size: 1.05rem;
+  color: inherit;
+}
+
+.link-refresh:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--bg-soft);
+}
+
+.link-refresh:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.link-refresh.is-busy .material-symbols-outlined {
+  animation: hub-spin 0.8s linear infinite;
+}
+
+@keyframes hub-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .item-name {
   display: flex;
   flex-wrap: wrap;

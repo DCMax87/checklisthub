@@ -40,6 +40,11 @@
     return TEAM_CHECKLIST_RE.test(String(name || "").trim());
   }
 
+  /** Trello template cards (and their checklists) are excluded from the hub. */
+  function isTemplateCard(card) {
+    return Boolean(card && card.isTemplate);
+  }
+
   function extractShortLink(text) {
     const raw = String(text || "").trim();
     if (!raw) return null;
@@ -263,7 +268,7 @@
       list_fields: "id,name",
       cards: "visible",
       card_fields:
-        "id,name,shortUrl,url,idList,idMembers,due,dueComplete,dueReminder,closed,labels,badges",
+        "id,name,shortUrl,url,idList,idMembers,due,dueComplete,dueReminder,closed,labels,badges,isTemplate",
       checklists: "all",
       // Board nested checklists may omit items under load; we also refetch
       // /checklists when badges/items look incomplete (see loadBoardsBundle).
@@ -311,7 +316,7 @@
     const q = new URLSearchParams({
       filter: "visible",
       fields:
-        "id,name,shortUrl,url,idList,idMembers,due,dueComplete,dueReminder,closed,labels,badges",
+        "id,name,shortUrl,url,idList,idMembers,due,dueComplete,dueReminder,closed,labels,badges,isTemplate",
       checklists: "all",
       checklist_fields: "id,name",
       checkItems: "all",
@@ -510,6 +515,7 @@
     listNameById
   ) {
     if (isTeamConfigChecklist(checklist && checklist.name)) return;
+    if (isTemplateCard(card)) return;
     if (!checkItem || !checkItem.id) return;
     const memberId = normalizeMemberId(checkItem.idMember);
     const memberIds = (card && card.idMembers) || [];
@@ -544,7 +550,7 @@
   function flattenFromBoardPayload(board, payload, membersById) {
     const cardsById = {};
     (payload.cards || []).forEach(function (card) {
-      if (card && card.id) cardsById[card.id] = card;
+      if (card && card.id && !isTemplateCard(card)) cardsById[card.id] = card;
     });
 
     const listNameById = {};
@@ -557,7 +563,7 @@
 
     function addChecklist(checklist, card) {
       if (!checklist || isTeamConfigChecklist(checklist.name)) return;
-      if (!card || !card.id) return;
+      if (!card || !card.id || isTemplateCard(card)) return;
       (checklist.checkItems || []).forEach(function (checkItem) {
         if (!checkItem || !checkItem.id || seen[checkItem.id]) return;
         seen[checkItem.id] = true;
@@ -580,6 +586,7 @@
 
     // Also read checklists nested under cards (fallback /cards?checklists=all).
     (payload.cards || []).forEach(function (card) {
+      if (isTemplateCard(card)) return;
       (card.checklists || []).forEach(function (checklist) {
         addChecklist(checklist, card);
       });
@@ -737,6 +744,7 @@
 
     const out = [];
     (cards || []).forEach(function (card) {
+      if (isTemplateCard(card)) return;
       const memberIds = (card.idMembers || []).map(normalizeMemberId);
       if (memberIds.indexOf(myId) === -1) return;
       if (cardIdsWithMyTasks[card.id]) return;
@@ -1335,7 +1343,7 @@
       "?" +
       new URLSearchParams({
         fields:
-          "id,name,due,dueComplete,dueReminder,closed,idMembers,shortUrl,url,idList,labels",
+          "id,name,due,dueComplete,dueReminder,closed,idMembers,shortUrl,url,idList,labels,isTemplate",
         checklists: "all",
         checklist_fields: "id,name",
         checkItems: "all",
@@ -1491,7 +1499,8 @@
       return { updated: 0, removed: 0, added: 0, skipped: 1 };
     }
 
-    if (!fresh || fresh.closed) {
+    // Drop closed or template cards — templates should never appear in the hub.
+    if (!fresh || fresh.closed || isTemplateCard(fresh)) {
       const beforeItems = (source.items || []).length;
       source.items = (source.items || []).filter(function (item) {
         return item.cardId !== cardId;

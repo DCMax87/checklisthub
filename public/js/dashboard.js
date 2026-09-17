@@ -239,6 +239,13 @@
     boardCatalog: null,
     allowlistRescanNeeded: false,
     bannerAction: null,
+    /** Board id currently being refreshed from a row action (null when idle). */
+    refreshingBoardId: null,
+    /**
+     * Debounced Open→board refresh: boardId →
+     * { timerId, boardName, followUp }.
+     */
+    pendingBoardRefreshes: {},
     pendingViewId: "",
     teams: [],
     selectedTeamId: "",
@@ -519,9 +526,13 @@
     return null;
   }
 
-  function openSafeCardUrl(url) {
+  function openSafeCardUrl(url, item) {
     var safe = safeCardUrl(url);
-    if (safe) window.open(safe, "_blank", "noopener,noreferrer");
+    if (!safe) return;
+    window.open(safe, "_blank", "noopener,noreferrer");
+    if (item && item.boardId) {
+      scheduleBoardRefreshAfterOpen(item.boardId, item.boardName);
+    }
   }
 
   function applySafeHref(anchor, url) {
@@ -1990,6 +2001,9 @@
       nameLink.rel = "noopener noreferrer";
       appendItemTitle(nameLink, title, { allowLinks: false });
       if (applySafeHref(nameLink, cardUrl)) {
+        nameLink.addEventListener("click", function () {
+          scheduleBoardRefreshAfterOpen(item.boardId, item.boardName);
+        });
         parent.appendChild(nameLink);
       } else {
         var fallback = document.createElement("span");
@@ -2142,6 +2156,36 @@
 
     var linkTd = document.createElement("td");
     linkTd.className = "col-link";
+    var linkActions = document.createElement("div");
+    linkActions.className = "link-actions";
+
+    if (item.boardId) {
+      var refreshBtn = document.createElement("button");
+      refreshBtn.type = "button";
+      refreshBtn.className = "link-refresh";
+      refreshBtn.title =
+        "Refresh this board (" + (item.boardName || "board") + ")";
+      refreshBtn.setAttribute(
+        "aria-label",
+        "Refresh board " + (item.boardName || "")
+      );
+      refreshBtn.appendChild(materialIcon("sync"));
+      var boardBusy =
+        state.loading ||
+        (state.refreshingBoardId &&
+          state.refreshingBoardId === item.boardId);
+      refreshBtn.disabled = Boolean(boardBusy);
+      if (boardBusy && state.refreshingBoardId === item.boardId) {
+        refreshBtn.classList.add("is-busy");
+      }
+      refreshBtn.addEventListener("click", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        refreshOneBoard(item.boardId, item.boardName);
+      });
+      linkActions.appendChild(refreshBtn);
+    }
+
     if (item.cardUrl) {
       var a = document.createElement("a");
       a.target = "_blank";
@@ -2156,10 +2200,15 @@
         "Open card " + (item.cardName || item.name || "") + " in Trello"
       );
       if (applySafeHref(a, item.cardUrl)) {
-        linkTd.appendChild(a);
-      } else {
-        linkTd.textContent = "—";
+        a.addEventListener("click", function () {
+          scheduleBoardRefreshAfterOpen(item.boardId, item.boardName);
+        });
+        linkActions.appendChild(a);
       }
+    }
+
+    if (linkActions.childNodes.length) {
+      linkTd.appendChild(linkActions);
     } else {
       linkTd.textContent = "—";
     }
@@ -2536,6 +2585,7 @@
             }
             preview.addEventListener("click", function (event) {
               event.stopPropagation();
+              scheduleBoardRefreshAfterOpen(item.boardId, item.boardName);
             });
           }
           previews.appendChild(preview);
@@ -2984,7 +3034,7 @@
       },
       onOpen: function (item) {
         if (item && item.cardUrl) {
-          openSafeCardUrl(item.cardUrl);
+          openSafeCardUrl(item.cardUrl, item);
         }
       },
       onChecklistDetail: function (checklist) {
@@ -3575,6 +3625,7 @@
     closeScanConfirm();
     closeLoadBlockedModal();
     closeWelcomeModal({ persist: true, skipSession: true });
+    clearAllPendingBoardRefreshes();
     if (!retried && boardListInFlight && !state.boardsReady) {
       return boardListInFlight.then(function () {
         return beginScan(true);
@@ -3592,6 +3643,9 @@
         // ignore
       }
     }
+    // Release any in-flight single-board refresh so loadData is not blocked.
+    state.refreshingBoardId = null;
+    state.loading = false;
     state.scanAbort =
       typeof AbortController !== "undefined" ? new AbortController() : null;
     if (!state.demo) api.clearCache();
@@ -4028,6 +4082,8 @@
   function showIdleWorkspace() {
     state.data = null;
     state.allowlistRescanNeeded = false;
+    state.refreshingBoardId = null;
+    clearAllPendingBoardRefreshes();
     state.statusNudgeDismissedUntil = 0;
     stopStatusNudgeWatch();
     if (els.resultCount) els.resultCount.textContent = "";
@@ -4382,6 +4438,8 @@
         return null;
       })
       .then(function () {
+        clearAllPendingBoardRefreshes();
+        state.refreshingBoardId = null;
         state.token = null;
         state.data = null;
         state.boardsReady = false;
@@ -4579,6 +4637,7 @@
       hideScanProgress();
       syncActionButtons();
       updateStatusNudge();
+      flushScheduledBoardRefreshes();
     };
 
     if (state.demo) {
@@ -4720,6 +4779,7 @@
       hideScanProgress();
       syncActionButtons();
       updateScanNudge();
+      flushScheduledBoardRefreshes();
     };
 
     return ensureAuthorized()
@@ -4765,6 +4825,196 @@
         }
         if (handleAuthorizationError(err)) return;
         showErrorBanner(err, "Add selected boards");
+      })
+      .finally(finish);
+  }
+
+  /**
+   * Reload one board's checklist work (typically one nested /boards/{id} call).
+   * Used by the per-row sync control and debounced Open→refresh.
+   */
+  function openBoardRefreshDelayMs() {
+    var raw = config && config.openBoardRefreshMs;
+    if (raw === 0 || raw === "0") return 0;
+    var ms = Number(raw);
+    if (!isFinite(ms) || ms < 0) return 60 * 1000;
+    return ms;
+  }
+
+  function clearPendingBoardRefresh(boardId) {
+    var id = boardId && String(boardId);
+    if (!id || !state.pendingBoardRefreshes) return;
+    var entry = state.pendingBoardRefreshes[id];
+    if (entry && entry.timerId) {
+      clearTimeout(entry.timerId);
+    }
+    delete state.pendingBoardRefreshes[id];
+  }
+
+  function clearAllPendingBoardRefreshes() {
+    Object.keys(state.pendingBoardRefreshes || {}).forEach(function (id) {
+      clearPendingBoardRefresh(id);
+    });
+    state.pendingBoardRefreshes = {};
+  }
+
+  /**
+   * After Open card: wait openBoardRefreshMs, then refresh that board.
+   * Re-open of the same board cancels the prior timer and starts a new one.
+   */
+  function scheduleBoardRefreshAfterOpen(boardId, boardName) {
+    var delay = openBoardRefreshDelayMs();
+    var id = boardId && String(boardId);
+    if (!delay || !id || !state.data || state.demo) return;
+
+    var prev = state.pendingBoardRefreshes[id];
+    if (prev && prev.timerId) clearTimeout(prev.timerId);
+
+    var label =
+      boardName || (prev && prev.boardName) || "board";
+    var timerId = setTimeout(function () {
+      var entry = state.pendingBoardRefreshes[id];
+      delete state.pendingBoardRefreshes[id];
+      runScheduledBoardRefresh(id, (entry && entry.boardName) || label);
+    }, delay);
+
+    state.pendingBoardRefreshes[id] = {
+      timerId: timerId,
+      boardName: label,
+      followUp: false,
+    };
+  }
+
+  function runScheduledBoardRefresh(boardId, boardName) {
+    var id = boardId && String(boardId);
+    if (!id || !state.data) return;
+    // Hub busy: keep a single follow-up; do not start overlapping loads.
+    if (state.loading || state.refreshingBoardId) {
+      markBoardRefreshFollowUp(id, boardName);
+      return;
+    }
+    refreshOneBoard(id, boardName, { quiet: true });
+  }
+
+  /** Queue a follow-up without cancelling an active debounce timer. */
+  function markBoardRefreshFollowUp(boardId, boardName) {
+    var id = boardId && String(boardId);
+    if (!id) return;
+    var existing = state.pendingBoardRefreshes[id];
+    if (existing && existing.timerId) {
+      // Latest Open timer still owns this board; when it fires it will retry.
+      existing.boardName = boardName || existing.boardName || "board";
+      return;
+    }
+    state.pendingBoardRefreshes[id] = {
+      timerId: null,
+      boardName: boardName || (existing && existing.boardName) || "board",
+      followUp: true,
+    };
+  }
+
+  function flushScheduledBoardRefreshes() {
+    if (state.loading || state.refreshingBoardId || !state.data) return;
+    var ids = Object.keys(state.pendingBoardRefreshes || {});
+    for (var i = 0; i < ids.length; i++) {
+      var id = ids[i];
+      var entry = state.pendingBoardRefreshes[id];
+      if (entry && entry.followUp && !entry.timerId) {
+        delete state.pendingBoardRefreshes[id];
+        refreshOneBoard(id, entry.boardName, { quiet: true });
+        return;
+      }
+    }
+  }
+
+  function refreshOneBoard(boardId, boardName, options) {
+    var opts = options || {};
+    var id = boardId && String(boardId);
+    if (!id || !state.data) return Promise.resolve();
+    if (state.loading || state.refreshingBoardId) {
+      if (opts.quiet) markBoardRefreshFollowUp(id, boardName);
+      return Promise.resolve();
+    }
+
+    clearPendingBoardRefresh(id);
+
+    if (state.demo) {
+      if (!opts.quiet) {
+        showBanner(
+          "Demo mode — board refresh is simulated.",
+          "info",
+          { dismissible: true }
+        );
+      }
+      return Promise.resolve();
+    }
+
+    state.loading = true;
+    state.refreshingBoardId = id;
+    syncActionButtons();
+    renderTable();
+    if (!opts.quiet) clearNonPrivacyBanner();
+    state.scanAbort =
+      typeof AbortController !== "undefined" ? new AbortController() : null;
+    var loadAbort = state.scanAbort;
+    var label = boardName || "board";
+    els.subtitle.textContent = "Refreshing " + label + "…";
+    setScanProgress(0, 1, label);
+
+    var finish = function () {
+      // Always release this board refresh, even if a newer scan replaced scanAbort.
+      if (state.refreshingBoardId === id) {
+        state.refreshingBoardId = null;
+        state.loading = false;
+        hideScanProgress();
+        syncActionButtons();
+        updateScanNudge();
+        renderTable();
+      }
+      if (state.scanAbort === loadAbort) {
+        state.scanAbort = null;
+      }
+      flushScheduledBoardRefreshes();
+    };
+
+    return ensureAuthorized()
+      .then(function (token) {
+        if (!token) return null;
+        state.token = token;
+        return api.loadAdditionalBoards(token, state.data, [id], {
+          signal: loadAbort ? loadAbort.signal : null,
+          onProgress: function (done, total, name) {
+            if (state.refreshingBoardId !== id) return;
+            els.subtitle.textContent =
+              "Refreshing " + (name || label) + "…";
+            setScanProgress(done, total, name || label);
+          },
+        });
+      })
+      .then(function (result) {
+        if (!result) return;
+        // Stale response after a newer full scan took over — ignore.
+        if (state.refreshingBoardId !== id) return;
+        applyDataset(result.data, {
+          cacheNote: "Refreshed · " + label,
+        });
+        if (!opts.quiet) {
+          showBanner("Refreshed " + label + ".", "info", {
+            dismissible: true,
+          });
+        }
+      })
+      .catch(function (err) {
+        if (err && err.name === "AbortError") {
+          if (!opts.quiet && state.refreshingBoardId === id) {
+            showBanner("Refresh cancelled.", "info", { dismissible: true });
+          }
+          return;
+        }
+        if (handleAuthorizationError(err)) return;
+        if (state.refreshingBoardId === id) {
+          showErrorBanner(err, "Refresh board");
+        }
       })
       .finally(finish);
   }
@@ -4860,6 +5110,7 @@
       hideScanProgress();
       syncActionButtons();
       updateScanNudge();
+      flushScheduledBoardRefreshes();
     };
 
     if (state.demo) {
@@ -5447,6 +5698,14 @@
         checklist.cardUrl ||
         (checklist.sample && checklist.sample.cardUrl) ||
         "";
+      var ganttBoardId =
+        (checklist.sample && checklist.sample.boardId) ||
+        (items[0] && items[0].boardId) ||
+        "";
+      var ganttBoardName =
+        (checklist.sample && checklist.sample.boardName) ||
+        (items[0] && items[0].boardName) ||
+        "";
       if (url && applySafeHref(els.ganttChecklistOpenCard, url)) {
         els.ganttChecklistOpenCard.hidden = false;
         els.ganttChecklistOpenCard.setAttribute(
@@ -5455,9 +5714,15 @@
             (checklist.cardName || "") +
             " in Trello"
         );
+        els.ganttChecklistOpenCard.onclick = function () {
+          if (ganttBoardId) {
+            scheduleBoardRefreshAfterOpen(ganttBoardId, ganttBoardName);
+          }
+        };
       } else {
         els.ganttChecklistOpenCard.hidden = true;
         els.ganttChecklistOpenCard.removeAttribute("href");
+        els.ganttChecklistOpenCard.onclick = null;
       }
     }
 
@@ -5514,6 +5779,12 @@
               " in Trello"
           );
           if (applySafeHref(openLink, itemUrl)) {
+            openLink.addEventListener("click", function () {
+              scheduleBoardRefreshAfterOpen(
+                item.boardId || ganttBoardId,
+                item.boardName || ganttBoardName
+              );
+            });
             actions.appendChild(openLink);
           }
           main.appendChild(actions);
@@ -6651,7 +6922,7 @@
         return row.id === state.selectedRowId;
       });
       if (item && item.cardUrl) {
-        openSafeCardUrl(item.cardUrl);
+        openSafeCardUrl(item.cardUrl, item);
       }
       return;
     }
