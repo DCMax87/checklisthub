@@ -10,7 +10,16 @@
     )
   );
   const TOKEN_WINDOW_MS = 10 * 1000;
-  const TOKEN_BUDGET = 90;
+  /** Self-imposed board API budget per 10s (Trello token ceiling is ~100). */
+  const TOKEN_BUDGET = Math.max(
+    1,
+    Math.min(
+      100,
+      Number(config.boardApiUnitsPer10s != null
+        ? config.boardApiUnitsPer10s
+        : config.tokenBudgetPer10s) || 15
+    )
+  );
 
   /**
    * Ephemeral in-memory only while this page/modal is open.
@@ -973,219 +982,49 @@
     let fallbackUnits = 0;
     let completed = 0;
 
-    const boardById = {};
-    boards.forEach(function (b) {
-      boardById[b.id] = b;
-    });
-
-    const nestedChunks = chunk(
-      boards.map(function (b) {
-        return boardNestedRoute(b.id);
-      }),
-      BATCH_SIZE
-    );
-
-    const nestedPayloads = {};
-    for (let i = 0; i < nestedChunks.length; i += 1) {
-      assertNotAborted(signal);
-      const batch = await fetchBatch(nestedChunks[i], token, { signal: signal });
-      httpCalls += 1;
-      nestedUnits += nestedChunks[i].length;
-
-      nestedChunks[i].forEach(function (route, idx) {
-        const boardId = route.split("?")[0].replace("/boards/", "");
-        const boardName =
-          (boardById[boardId] && boardById[boardId].name) || boardId;
-        const status = batchItemStatus(batch[idx]);
-        if (status.ok && status.data) {
-          nestedPayloads[boardId] = status.data;
-        } else {
-          boardErrors.push({
-            boardId: boardId,
-            boardName: boardName,
-            message: status.message || "Failed to load board",
-          });
-        }
-        completed += 1;
-        if (onProgress) {
-          onProgress(
-            Math.min(completed, boards.length),
-            boards.length,
-            boardName
-          );
-        }
-      });
-    }
-
-    const needsFallback = boards.filter(function (board) {
-      if (
-        boardErrors.some(function (err) {
-          return err.boardId === board.id;
-        })
-      ) {
-        return false;
-      }
-      const payload = nestedPayloads[board.id];
-      return !payloadLooksComplete(payload);
-    });
-
-    const needsChecklistRefetch = boards.filter(function (board) {
-      if (
-        boardErrors.some(function (err) {
-          return err.boardId === board.id;
-        })
-      ) {
-        return false;
-      }
-      if (needsFallback.some(function (b) {
-        return b.id === board.id;
-      })) {
-        return false;
-      }
-      return payloadSuggestsMissingCheckItems(nestedPayloads[board.id]);
-    });
-
-    if (needsChecklistRefetch.length) {
-      const checklistChunks = chunk(
-        needsChecklistRefetch.map(function (board) {
-          return boardChecklistsRoute(board.id);
-        }),
-        BATCH_SIZE
-      );
-      for (let i = 0; i < checklistChunks.length; i += 1) {
-        assertNotAborted(signal);
-        const batch = await fetchBatch(checklistChunks[i], token, {
-          signal: signal,
-          label: "checklists",
-        });
-        httpCalls += 1;
-        nestedUnits += checklistChunks[i].length;
-
-        checklistChunks[i].forEach(function (route, idx) {
-          const path = route.split("?")[0];
-          const boardId = path.replace(/^\/boards\//, "").replace(
-            /\/checklists$/,
-            ""
-          );
-          const status = batchItemStatus(batch[idx]);
-          if (!status.ok || !status.data) return;
-          const payload = nestedPayloads[boardId];
-          if (!payload) return;
-          payload.checklists = status.data || [];
-        });
-      }
-    }
-
-    if (needsFallback.length) {
-      const fallbackRoutes = [];
-      needsFallback.forEach(function (board) {
-        fallbackRoutes.push(boardCardsRoute(board.id));
-        fallbackRoutes.push(boardMembersRoute(board.id));
-      });
-      const fallbackChunks = chunk(fallbackRoutes, BATCH_SIZE);
-      const fallbackByBoard = {};
-
-      for (let i = 0; i < fallbackChunks.length; i += 1) {
-        assertNotAborted(signal);
-        const batch = await fetchBatch(fallbackChunks[i], token, {
-          signal: signal,
-        });
-        httpCalls += 1;
-        fallbackUnits += fallbackChunks[i].length;
-
-        fallbackChunks[i].forEach(function (route, idx) {
-          const status = batchItemStatus(batch[idx]);
-          const boardId = route.split("/")[2].split("?")[0];
-          const boardName =
-            (boardById[boardId] && boardById[boardId].name) || boardId;
-          if (!fallbackByBoard[boardId]) {
-            fallbackByBoard[boardId] = { cards: [], members: [], failed: false };
-          }
-          if (!status.ok) {
-            fallbackByBoard[boardId].failed = true;
-            if (
-              !boardErrors.some(function (err) {
-                return err.boardId === boardId;
-              })
-            ) {
-              boardErrors.push({
-                boardId: boardId,
-                boardName: boardName,
-                message: status.message || "Fallback fetch failed",
-              });
-            }
-            return;
-          }
-          if (route.indexOf("/cards?") >= 0) {
-            fallbackByBoard[boardId].cards = status.data || [];
-          } else {
-            fallbackByBoard[boardId].members = status.data || [];
-          }
-        });
-      }
-
-      needsFallback.forEach(function (board) {
-        const fb = fallbackByBoard[board.id] || {
-          cards: [],
-          members: [],
-          failed: false,
-        };
-        if (fb.failed) return;
-        nestedPayloads[board.id] = {
-          cards: fb.cards,
-          members: fb.members,
-          checklists: [],
-          lists: [],
-          labels: [],
-        };
-      });
-    }
-
     const items = [];
     const memberCards = [];
     const labelsById = {};
     const listsById = {};
-    const failedIds = {};
-    boardErrors.forEach(function (err) {
-      failedIds[err.boardId] = true;
-    });
+    const onBoardReady =
+      typeof opts.onBoardReady === "function" ? opts.onBoardReady : null;
 
-    boards.forEach(function (board) {
-      if (failedIds[board.id] && !nestedPayloads[board.id]) return;
-      const payload = nestedPayloads[board.id] || {
-        cards: [],
-        members: [],
-        checklists: [],
-        lists: [],
-        labels: [],
-      };
+    function materializeBoard(board, payload) {
+      const sliceItems = [];
+      const sliceCards = [];
+      const sliceLabels = [];
+      const sliceLists = [];
+      const sliceMembers = [];
+
       (payload.members || []).forEach(function (member) {
+        if (!member || !member.id) return;
         membersById[member.id] = member;
       });
       (payload.labels || []).forEach(function (label) {
         if (!label || !label.id) return;
-        labelsById[label.id] = {
+        const normalized = {
           id: label.id,
           name: labelDisplayName(label),
           color: label.color || "null",
         };
+        labelsById[label.id] = normalized;
+        sliceLabels.push(normalized);
       });
       const listNameById = {};
       (payload.lists || []).forEach(function (list) {
         if (!list || !list.id) return;
         listNameById[list.id] = list.name || "";
-        listsById[list.id] = {
+        const entry = {
           id: list.id,
           name: list.name || "List",
           boardId: board.id,
           boardName: board.name,
         };
+        listsById[list.id] = entry;
+        sliceLists.push(entry);
       });
-      const boardItems = flattenFromBoardPayload(
-        board,
-        payload,
-        membersById
-      );
+
+      const boardItems = flattenFromBoardPayload(board, payload, membersById);
       boardItems.forEach(function (item) {
         if (item.idMember && membersById[item.idMember]) {
           item.assigneeName = membersById[item.idMember].fullName;
@@ -1193,10 +1032,13 @@
         (item.labels || []).forEach(function (label) {
           if (label && label.id && !labelsById[label.id]) {
             labelsById[label.id] = label;
+            sliceLabels.push(label);
           }
         });
+        sliceItems.push(item);
         items.push(item);
       });
+
       extractMemberCardsWithoutTasks(
         board,
         payload.cards || [],
@@ -1208,11 +1050,150 @@
         (card.labels || []).forEach(function (label) {
           if (label && label.id && !labelsById[label.id]) {
             labelsById[label.id] = label;
+            sliceLabels.push(label);
           }
         });
+        sliceCards.push(card);
         memberCards.push(card);
       });
-    });
+
+      Object.keys(membersById).forEach(function (id) {
+        sliceMembers.push(membersById[id]);
+      });
+
+      return {
+        me: me,
+        boards: allBoards,
+        scannedBoardIds: [board.id],
+        items: sliceItems,
+        memberCards: sliceCards,
+        members: sliceMembers,
+        labels: sliceLabels,
+        lists: sliceLists,
+      };
+    }
+
+    async function enrichPayload(board, payload) {
+      let next = payload;
+      if (payloadSuggestsMissingCheckItems(next)) {
+        assertNotAborted(signal);
+        const batch = await fetchBatch([boardChecklistsRoute(board.id)], token, {
+          signal: signal,
+          label: "checklists",
+        });
+        httpCalls += 1;
+        nestedUnits += 1;
+        const status = batchItemStatus(batch[0]);
+        if (status.ok && status.data) {
+          next = Object.assign({}, next, {
+            checklists: status.data || [],
+          });
+        }
+      }
+      if (!payloadLooksComplete(next)) {
+        assertNotAborted(signal);
+        const batch = await fetchBatch(
+          [boardCardsRoute(board.id), boardMembersRoute(board.id)],
+          token,
+          { signal: signal, label: "board-fallback" }
+        );
+        httpCalls += 1;
+        fallbackUnits += 2;
+        const cardsStatus = batchItemStatus(batch[0]);
+        const membersStatus = batchItemStatus(batch[1]);
+        if (!cardsStatus.ok) {
+          return {
+            ok: false,
+            message: cardsStatus.message || "Fallback fetch failed",
+          };
+        }
+        next = {
+          cards: cardsStatus.data || [],
+          members: (membersStatus.ok && membersStatus.data) || next.members || [],
+          checklists: [],
+          lists: next.lists || [],
+          labels: next.labels || [],
+        };
+      }
+      return { ok: true, payload: next };
+    }
+
+    const boardChunks = chunk(boards, BATCH_SIZE);
+    for (let i = 0; i < boardChunks.length; i += 1) {
+      assertNotAborted(signal);
+      const chunkBoards = boardChunks[i];
+      const routes = chunkBoards.map(function (b) {
+        return boardNestedRoute(b.id);
+      });
+      const batch = await fetchBatch(routes, token, {
+        signal: signal,
+        label: "boards",
+      });
+      httpCalls += 1;
+      nestedUnits += routes.length;
+
+      for (let idx = 0; idx < chunkBoards.length; idx += 1) {
+        assertNotAborted(signal);
+        const board = chunkBoards[idx];
+        const boardName = board.name || board.id;
+        const status = batchItemStatus(batch[idx]);
+        if (!status.ok || !status.data) {
+          boardErrors.push({
+            boardId: board.id,
+            boardName: boardName,
+            message: status.message || "Failed to load board",
+          });
+          completed += 1;
+          if (onProgress) {
+            onProgress(
+              Math.min(completed, boards.length),
+              boards.length,
+              boardName
+            );
+          }
+          continue;
+        }
+
+        const enriched = await enrichPayload(board, status.data);
+        if (!enriched.ok) {
+          boardErrors.push({
+            boardId: board.id,
+            boardName: boardName,
+            message: enriched.message || "Failed to load board",
+          });
+          completed += 1;
+          if (onProgress) {
+            onProgress(
+              Math.min(completed, boards.length),
+              boards.length,
+              boardName
+            );
+          }
+          continue;
+        }
+
+        const slice = materializeBoard(board, enriched.payload);
+        completed += 1;
+        if (onProgress) {
+          onProgress(
+            Math.min(completed, boards.length),
+            boards.length,
+            boardName
+          );
+        }
+        if (onBoardReady) {
+          try {
+            onBoardReady(slice, {
+              done: completed,
+              total: boards.length,
+              boardName: boardName,
+            });
+          } catch (e) {
+            // UI callback must not abort the scan.
+          }
+        }
+      }
+    }
 
     return withRemindersExpanded({
       fetchedAt: Date.now(),
@@ -1249,7 +1230,9 @@
         rateLimitUnits: nestedUnits + fallbackUnits + bootstrapUnits,
         boardErrors: boardErrors,
         strategy:
-          "allowlist-aware scan; /batch nested board GETs; in-memory only while open",
+          "allowlist scan; progressive per-board emit; client budget " +
+          TOKEN_BUDGET +
+          "/10s",
       },
     });
   }
@@ -1325,6 +1308,7 @@
 
     const data = await loadBoardsBundle(token, {
       onProgress: opts.onProgress,
+      onBoardReady: opts.onBoardReady || null,
       boardIds: boardIds,
       signal: opts.signal || null,
       me: opts.me || null,
@@ -1450,6 +1434,7 @@
       boardIds: ids,
       signal: opts.signal || null,
       onProgress: opts.onProgress,
+      onBoardReady: opts.onBoardReady || null,
     });
 
     source.items = stripReminderRows(source.items);

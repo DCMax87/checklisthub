@@ -17,7 +17,7 @@ window.CHECKLIST_HUB_CONFIG = {
   /** Alternate support link (docs, issues). Optional. */
   supportUrl: "",
   /** Display version in the hub footer. */
-  appVersion: "1.1.8",
+  appVersion: "1.1.9",
   /** After this age, suggest a full selected-board rescan for new work. */
   rescanNudgeMs: 15 * 60 * 1000,
   /**
@@ -25,6 +25,11 @@ window.CHECKLIST_HUB_CONFIG = {
    * Lower = gentler on shared API-key rate limits; higher = fewer HTTP round-trips.
    */
   batchRoutesPerRequest: 3,
+  /**
+   * Max board-related API route units this hub will send per 10 seconds
+   * (client-side fair use; well under Trello’s ~100/token ceiling).
+   */
+  boardApiUnitsPer10s: 15,
   /**
    * After statuses are this old, show a Refresh banner (no automatic API calls).
    * 0 disables the nudge.
@@ -34,7 +39,7 @@ window.CHECKLIST_HUB_CONFIG = {
    * After Open card, wait this long then refresh that card's board (debounced
    * per board). 0 disables. Re-opening the same board resets the timer.
    */
-  openBoardRefreshMs: 60 * 1000,
+  openBoardRefreshMs: 45 * 1000,
   /**
    * Trello OAuth token lifetime: "1hour" | "1day" | "30days" | "never".
    * Prefer a finite value for public installs; users can re-authorize when it expires.

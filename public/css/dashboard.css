@@ -2876,6 +2876,12 @@ body.theme-dark .gantt-checklist-modal-name .md-code {
   font-size: 0.78rem;
 }
 
+.card-checklist-name {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
 #export-btn[hidden] {
   display: none !important;
 }

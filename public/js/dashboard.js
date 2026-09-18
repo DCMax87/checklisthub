@@ -2091,8 +2091,7 @@
     nameWrap.className = "item-name";
     appendTypePills(nameWrap, item);
     appendLinkedItemTitle(nameWrap, item, "item-name-link");
-    var meta = document.createElement("div");
-    meta.className = "item-meta";
+    nameTd.appendChild(nameWrap);
     var metaBits = [];
     if (isReminderRow(item)) {
       metaBits.push(
@@ -2101,14 +2100,22 @@
       );
     } else if (isCardWork(item) && !isReminderRow(item)) {
       metaBits.push(membershipCaptionFor(item));
-    } else if (!isReminderRow(item) && item.checklistName) {
-      metaBits.push(item.checklistName);
     }
-    meta.textContent = metaBits.join(" · ");
-    nameTd.appendChild(nameWrap);
-    nameTd.appendChild(meta);
+    if (metaBits.length) {
+      var meta = document.createElement("div");
+      meta.className = "item-meta";
+      meta.textContent = metaBits.join(" · ");
+      nameTd.appendChild(meta);
+    }
     var mobileBits = [];
     if (item.cardName) mobileBits.push(item.cardName);
+    if (
+      !isReminderRow(item) &&
+      !isCardWork(item) &&
+      item.checklistName
+    ) {
+      mobileBits.push(item.checklistName);
+    }
     if (item.assigneeName) mobileBits.push(item.assigneeName);
     if (mobileBits.length) {
       var mobileMeta = document.createElement("div");
@@ -2153,7 +2160,23 @@
 
     var cardTd = document.createElement("td");
     cardTd.className = "col-card";
-    cardTd.textContent = item.cardName;
+    var cardCell = document.createElement("div");
+    cardCell.className = "card-cell";
+    var cardNameEl = document.createElement("div");
+    cardNameEl.className = "card-cell-name";
+    cardNameEl.textContent = item.cardName || "—";
+    cardCell.appendChild(cardNameEl);
+    if (
+      !isReminderRow(item) &&
+      !isCardWork(item) &&
+      item.checklistName
+    ) {
+      var checklistLine = document.createElement("div");
+      checklistLine.className = "card-checklist-name";
+      checklistLine.textContent = item.checklistName;
+      cardCell.appendChild(checklistLine);
+    }
+    cardTd.appendChild(cardCell);
 
     var assigneeTd = document.createElement("td");
     assigneeTd.className = "col-assignee";
@@ -4543,7 +4566,9 @@
       data = window.ChecklistHubApi.withRemindersExpanded(data);
     }
     state.data = data;
-    resetGroupVisibleCounts();
+    if (!opts.progressive) {
+      resetGroupVisibleCounts();
+    }
     (data.members || []).forEach(registerAssigneeMember);
     if (data.me) registerAssigneeMember(data.me);
     populateAllowlistBoards(data.boards);
@@ -4561,7 +4586,12 @@
         ? scannedLabel + " · " + els.cacheNote.textContent
         : scannedLabel;
     }
-    if (data.meta && data.meta.boardErrors && data.meta.boardErrors.length) {
+    if (
+      !opts.progressive &&
+      data.meta &&
+      data.meta.boardErrors &&
+      data.meta.boardErrors.length
+    ) {
       var failCount = data.meta.boardErrors.length;
       var okCount = Math.max(
         0,
@@ -4631,7 +4661,7 @@
     } catch (err) {
       // Scan nudge is optional.
     }
-    if (applyPendingOrDefaultView()) return;
+    if (!opts.progressive && applyPendingOrDefaultView()) return;
     renderTable();
   }
 
@@ -4843,11 +4873,15 @@
                 "Adding boards " + done + "/" + total + " · " + boardName;
               setScanProgress(done, total, boardName);
             },
+            onBoardReady: function (slice, info) {
+              ingestProgressiveBoard(slice, info);
+            },
           }
         );
       })
       .then(function (result) {
         if (!result) return;
+        if (result.data) delete result.data._progressiveScan;
         applyDataset(result.data, {
           cacheNote:
             "Added " +
@@ -4883,7 +4917,7 @@
     var raw = config && config.openBoardRefreshMs;
     if (raw === 0 || raw === "0") return 0;
     var ms = Number(raw);
-    if (!isFinite(ms) || ms < 0) return 60 * 1000;
+    if (!isFinite(ms) || ms < 0) return 45 * 1000;
     return ms;
   }
 
@@ -5098,12 +5132,17 @@
               "Refreshing " + (name || label) + "…";
             setScanProgress(done, total, name || label);
           },
+          onBoardReady: function (slice, info) {
+            if (state.refreshingBoardId !== id) return;
+            ingestProgressiveBoard(slice, info);
+          },
         });
       })
       .then(function (result) {
         if (!result) return;
         // Stale response after a newer full scan took over — ignore.
         if (state.refreshingBoardId !== id) return;
+        if (result.data) delete result.data._progressiveScan;
         applyDataset(result.data, {
           cacheNote: "Refreshed · " + label,
         });
@@ -5186,6 +5225,57 @@
     });
   }
 
+  function ingestProgressiveBoard(slice, info) {
+    if (!slice) return;
+    var done = (info && info.done) || 0;
+    var total = (info && info.total) || 0;
+    var boardName = (info && info.boardName) || "board";
+    var note =
+      total > 0
+        ? "Loading " + done + "/" + total + " · " + boardName
+        : "Loading · " + boardName;
+
+    if (!state.data) {
+      var seed = {
+        fetchedAt: Date.now(),
+        me: slice.me || (state.boardCatalog && state.boardCatalog.me) || null,
+        boards:
+          slice.boards ||
+          (state.boardCatalog && state.boardCatalog.boards) ||
+          [],
+        scannedBoardIds: (slice.scannedBoardIds || []).slice(),
+        members: (slice.members || []).slice(),
+        labels: (slice.labels || []).slice(),
+        lists: (slice.lists || []).slice(),
+        items: (slice.items || []).slice(),
+        memberCards: (slice.memberCards || []).slice(),
+        meta: { progressive: true },
+        _progressiveScan: true,
+      };
+      applyDataset(seed, {
+        progressive: true,
+        cacheNote: note,
+        keepSubtitle: true,
+        skipLastScanned: true,
+      });
+      return;
+    }
+
+    state.data._progressiveScan = true;
+    if (api && typeof api.mergeBoardSlice === "function") {
+      api.mergeBoardSlice(state.data, slice);
+    }
+    if (api && typeof api.withRemindersExpanded === "function") {
+      api.withRemindersExpanded(state.data);
+    }
+    applyDataset(state.data, {
+      progressive: true,
+      cacheNote: note,
+      keepSubtitle: true,
+      skipLastScanned: true,
+    });
+  }
+
   function loadData(forceRefresh) {
     var blocker = getLoadChecklistsBlocker();
     // beginScan already checks; guard any other callers.
@@ -5210,6 +5300,20 @@
     if (!loadAbort && typeof AbortController !== "undefined") {
       loadAbort = new AbortController();
       state.scanAbort = loadAbort;
+    }
+
+    // Clear prior checklist rows so progressive boards fill an empty list.
+    if (state.data) {
+      state.data.items = [];
+      state.data.memberCards = [];
+      state.data.scannedBoardIds = [];
+      state.data._progressiveScan = true;
+      clearListOrderMemory();
+      try {
+        renderTable();
+      } catch (e) {
+        // ignore
+      }
     }
 
     var finish = function () {
@@ -5270,6 +5374,9 @@
               "Loading checklists " + done + "/" + total + " · " + boardName;
             setScanProgress(done, total, boardName);
           },
+          onBoardReady: function (slice, info) {
+            ingestProgressiveBoard(slice, info);
+          },
         });
       })
       .then(function (result) {
@@ -5282,6 +5389,7 @@
             result.data.meta.boardErrors &&
             result.data.meta.boardErrors.length) ||
           0;
+        if (result.data) delete result.data._progressiveScan;
         applyDataset(result.data, {
           cacheNote:
             "Loaded from " +
