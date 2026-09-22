@@ -111,7 +111,11 @@
       checklistName: opts.checklistName,
       cardId: opts.cardId,
       cardName: opts.cardName,
-      cardUrl: "https://trello.com",
+      cardUrl:
+        "https://trello.com/c/demo" +
+        itemSeq +
+        "#checkitem-ci-gantt-" +
+        itemSeq,
       boardId: board.id,
       boardName: board.name,
       listId: list.id,

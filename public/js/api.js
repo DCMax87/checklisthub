@@ -452,6 +452,17 @@
     return String(id || "").replace(/#reminder-.*$/, "");
   }
 
+  /**
+   * Trello Home / card UI focuses a checklist item via #checkitem-{id}.
+   * Append that fragment so Open lands on the item, not just the card.
+   */
+  function cardUrlForCheckItem(url, checkItemId) {
+    if (!url) return url || "";
+    var id = baseItemId(checkItemId);
+    if (!id) return String(url);
+    return String(url).split("#")[0] + "#checkitem-" + id;
+  }
+
   function cloneReminderRow(item, leadDate) {
     const key = dateKeyLocal(leadDate);
     const dueAt = new Date(
@@ -543,7 +554,10 @@
       checklistName: checklist.name,
       cardId: card.id,
       cardName: card.name,
-      cardUrl: card.shortUrl || card.url,
+      cardUrl: cardUrlForCheckItem(
+        card.shortUrl || card.url,
+        checkItem.id
+      ),
       boardId: board.id,
       boardName: board.name,
       listId: card.idList || null,
@@ -1545,7 +1559,10 @@
           checklistName: checklist.name,
           cardId: fresh.id,
           cardName: fresh.name,
-          cardUrl: fresh.shortUrl || fresh.url,
+          cardUrl: cardUrlForCheckItem(
+            fresh.shortUrl || fresh.url,
+            checkItem.id
+          ),
           boardId: boardMeta.id,
           boardName: boardMeta.name,
           listId: fresh.idList || null,
@@ -1936,5 +1953,7 @@
     parseTeamsFromBoardPayload: parseTeamsFromBoardPayload,
     extractShortLink: extractShortLink,
     isTeamConfigChecklist: isTeamConfigChecklist,
+    cardUrlForCheckItem: cardUrlForCheckItem,
+    baseItemId: baseItemId,
   };
 })(window);
