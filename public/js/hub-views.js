@@ -94,12 +94,15 @@
     if (typeof host.onAcknowledge === "function") {
       var ackBtn = el("button", "link-ack");
       ackBtn.type = "button";
-      ackBtn.textContent = "Acknowledge";
       ackBtn.setAttribute(
         "aria-label",
         "Park for today — bring back tomorrow"
       );
       ackBtn.title = "Park for today — bring back tomorrow";
+      var ackIcon = el("span", "material-symbols-outlined");
+      ackIcon.setAttribute("aria-hidden", "true");
+      ackIcon.textContent = "snooze";
+      ackBtn.appendChild(ackIcon);
       ackBtn.addEventListener("click", function (event) {
         event.preventDefault();
         event.stopPropagation();

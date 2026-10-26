@@ -163,11 +163,25 @@
       cookies.remove(ACK_COOKIE);
       return [];
     }
-    cookies.writeJsonExpiresAt(
-      ACK_COOKIE,
-      { day: localDayKey(), ids: trimmed },
-      nextLocalMidnight()
-    );
+    const payload = { day: localDayKey(), ids: trimmed };
+    const midnight = nextLocalMidnight();
+    // Prefer absolute expiry; fall back to fractional-day max-age (same path as prefs).
+    if (typeof cookies.writeJsonExpiresAt === "function") {
+      cookies.writeJsonExpiresAt(ACK_COOKIE, payload, midnight);
+    }
+    var written = cookies.readJson(ACK_COOKIE, null);
+    if (
+      !written ||
+      written.day !== payload.day ||
+      !Array.isArray(written.ids) ||
+      written.ids.indexOf(trimmed[0]) < 0
+    ) {
+      var daysLeft = Math.max(
+        1 / 1440,
+        (midnight.getTime() - Date.now()) / 86400000
+      );
+      cookies.writeJson(ACK_COOKIE, payload, daysLeft);
+    }
     return trimmed;
   }
 

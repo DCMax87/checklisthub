@@ -2175,29 +2175,29 @@ body.theme-dark .assignee-chip.is-other {
 .link-ack {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   margin: 0;
-  padding: 0.15rem 0.4rem;
-  border: 1px solid var(--line);
+  padding: 0.15rem;
+  border: 0;
   border-radius: 4px;
   background: transparent;
   color: var(--muted);
-  font: inherit;
-  font-size: 0.72rem;
-  font-weight: 500;
-  line-height: 1.2;
   cursor: pointer;
-  white-space: nowrap;
+  line-height: 1;
+}
+
+.link-ack .material-symbols-outlined {
+  font-size: 1.05rem;
+  color: inherit;
 }
 
 .link-ack:hover {
   color: var(--ink);
-  border-color: var(--ink);
   background: var(--bg-soft);
 }
 
 .insight-actions .link-ack {
-  font-size: 0.78rem;
-  padding: 0.2rem 0.5rem;
+  padding: 0.2rem;
 }
 
 .hub-row.is-refresh-queued td:first-child {
@@ -2233,14 +2233,61 @@ body.theme-dark .assignee-chip.is-other {
   line-height: 1.35;
 }
 
+/* Due labels: chip backgrounds so text always meets contrast on light/dark */
+.col-due.due-overdue > span,
+.gantt-checklist-modal-due.due-overdue {
+  display: inline-block;
+  padding: 0.12rem 0.45rem;
+  border-radius: 4px;
+  background: #fce8e6;
+  color: #8f1e16;
+  font-weight: 600;
+}
+
+.col-due.due-today > span,
+.gantt-checklist-modal-due.due-today {
+  display: inline-block;
+  padding: 0.12rem 0.45rem;
+  border-radius: 4px;
+  background: #ffedd5;
+  color: #9a3412;
+  font-weight: 600;
+}
+
+html[data-theme="dark"] .col-due.due-overdue > span,
+html[data-theme="dark"] .gantt-checklist-modal-due.due-overdue,
+body.theme-dark .col-due.due-overdue > span,
+body.theme-dark .gantt-checklist-modal-due.due-overdue {
+  background: rgba(249, 112, 102, 0.28);
+  color: #fecaca;
+}
+
+html[data-theme="dark"] .col-due.due-today > span,
+html[data-theme="dark"] .gantt-checklist-modal-due.due-today,
+body.theme-dark .col-due.due-today > span,
+body.theme-dark .gantt-checklist-modal-due.due-today {
+  background: rgba(255, 176, 32, 0.28);
+  color: #ffe8a3;
+}
+
 .due-overdue {
-  color: var(--danger);
-  font-weight: 500;
+  color: #8f1e16;
+  font-weight: 600;
 }
 
 .due-today {
-  color: var(--warn);
-  font-weight: 500;
+  color: #9a3412;
+  font-weight: 600;
+}
+
+html[data-theme="dark"] .due-overdue,
+body.theme-dark .due-overdue {
+  color: #fecaca;
+}
+
+html[data-theme="dark"] .due-today,
+body.theme-dark .due-today {
+  color: #ffe8a3;
 }
 
 .col-check {
@@ -3669,9 +3716,17 @@ body.theme-dark .hub-row.is-opened.is-selected {
 }
 
 .agenda-when.is-overdue {
-  border-color: var(--danger);
-  background: rgba(180, 35, 24, 0.08);
-  color: var(--danger);
+  border-color: #8f1e16;
+  background: #fce8e6;
+  color: #8f1e16;
+  font-weight: 600;
+}
+
+html[data-theme="dark"] .agenda-when.is-overdue,
+body.theme-dark .agenda-when.is-overdue {
+  border-color: #fecaca;
+  background: rgba(249, 112, 102, 0.28);
+  color: #fecaca;
 }
 
 .agenda-when-actual {
@@ -4490,16 +4545,6 @@ button.gantt-bar-btn.is-marker:focus-visible {
   color: var(--muted);
 }
 
-.gantt-checklist-modal-due.due-overdue {
-  color: var(--danger);
-  font-weight: 600;
-}
-
-.gantt-checklist-modal-due.due-today {
-  color: var(--warn);
-  font-weight: 600;
-}
-
 .gantt-checklist-modal-empty {
   padding: 14px 12px;
   color: var(--muted);
@@ -4672,7 +4717,9 @@ html[data-theme="dark"] .label-chip[data-color="black"] {
 
 html[data-theme="dark"] .agenda-when.is-overdue,
 html[data-theme="dark"] .week-chip.is-overdue {
-  background: rgba(249, 112, 102, 0.14);
+  background: rgba(249, 112, 102, 0.28);
+  color: #fecaca;
+  border-color: #fecaca;
 }
 
 html[data-theme="dark"] .week-chip {

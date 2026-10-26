@@ -264,6 +264,10 @@
     selectedRowId: "",
     /** Row id last opened via Open / title link (session highlight). */
     lastOpenedRowId: "",
+    /** Same-day parked item ids (memory + midnight cookie). */
+    acknowledgedIds: prefsApi.loadAcknowledgedIds
+      ? prefsApi.loadAcknowledgedIds()
+      : [],
     visibleItems: [],
     /** Last list order (item id → index) for stable refresh reordering. */
     listOrderIndex: {},
@@ -378,28 +382,47 @@
   }
 
   function isAcknowledged(item) {
-    if (!item) return false;
-    if (prefsApi.isAcknowledgedId) return prefsApi.isAcknowledgedId(item.id);
-    return false;
+    var key = ackBaseId(item);
+    if (!key) return false;
+    return state.acknowledgedIds.indexOf(key) >= 0;
+  }
+
+  function flushRenderViews() {
+    if (renderFrame) {
+      if (typeof window.cancelAnimationFrame === "function") {
+        window.cancelAnimationFrame(renderFrame);
+      }
+      renderFrame = 0;
+    }
+    renderViews();
   }
 
   function acknowledgeItem(item) {
-    if (!item || !prefsApi.acknowledgeId) return;
-    prefsApi.acknowledgeId(item.id);
-    renderTable();
+    var key = ackBaseId(item);
+    if (!key) return;
+    if (state.acknowledgedIds.indexOf(key) < 0) {
+      state.acknowledgedIds = state.acknowledgedIds.concat([key]);
+    }
+    if (prefsApi.acknowledgeId) prefsApi.acknowledgeId(item.id);
+    flushRenderViews();
     renderAckPanel();
   }
 
   function unacknowledgeItem(item) {
-    if (!item || !prefsApi.unacknowledgeId) return;
-    prefsApi.unacknowledgeId(item.id);
-    renderTable();
+    var key = ackBaseId(item);
+    if (!key) return;
+    state.acknowledgedIds = state.acknowledgedIds.filter(function (id) {
+      return id !== key;
+    });
+    if (prefsApi.unacknowledgeId) prefsApi.unacknowledgeId(item.id);
+    flushRenderViews();
     renderAckPanel();
   }
 
   function resetAcknowledgedItems() {
+    state.acknowledgedIds = [];
     if (prefsApi.resetAcknowledged) prefsApi.resetAcknowledged();
-    renderTable();
+    flushRenderViews();
     renderAckPanel();
   }
 
@@ -445,9 +468,7 @@
       due: "all",
       bypassDue: true,
     });
-    var ackIds = prefsApi.loadAcknowledgedIds
-      ? prefsApi.loadAcknowledgedIds()
-      : [];
+    var ackIds = state.acknowledgedIds || [];
     if (!ackIds.length) return [];
     var ackSet = {};
     ackIds.forEach(function (id) {
@@ -2515,12 +2536,12 @@
       var ackBtn = document.createElement("button");
       ackBtn.type = "button";
       ackBtn.className = "link-ack";
-      ackBtn.textContent = "Ack";
       ackBtn.title = "Park for today — bring back tomorrow";
       ackBtn.setAttribute(
         "aria-label",
         "Park for today — bring back tomorrow"
       );
+      ackBtn.appendChild(materialIcon("snooze"));
       ackBtn.addEventListener("click", function (event) {
         event.preventDefault();
         event.stopPropagation();
