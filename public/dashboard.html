@@ -19,8 +19,8 @@
       href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./css/dashboard.css?v=20260922a" />
-    <script src="./js/theme-boot.js?v=20260922a"></script>
+    <link rel="stylesheet" href="./css/dashboard.css?v=20261026c" />
+    <script src="./js/theme-boot.js?v=20261026c"></script>
   </head>
   <body class="dashboard-page">
     <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -105,6 +105,36 @@
             <option value="calendar">Calendar</option>
           </select>
         </div>
+        <div
+          id="agenda-horizon"
+          class="agenda-horizon"
+          hidden
+          role="group"
+          aria-label="Agenda range"
+        >
+          <button type="button" class="agenda-horizon-btn is-active" data-horizon="today" aria-pressed="true">
+            Today
+          </button>
+          <button type="button" class="agenda-horizon-btn" data-horizon="7" aria-pressed="false">
+            7 days
+          </button>
+          <button type="button" class="agenda-horizon-btn" data-horizon="14" aria-pressed="false">
+            14 days
+          </button>
+        </div>
+        <button
+          type="button"
+          id="ack-panel-toggle"
+          class="btn btn-ghost ack-panel-toggle"
+          hidden
+          aria-expanded="false"
+          aria-controls="ack-panel"
+          title="Parked for today"
+        >
+          <span class="material-symbols-outlined" aria-hidden="true">inbox</span>
+          <span class="btn-label">Parked</span>
+          <span id="ack-panel-count" class="ack-badge" hidden>0</span>
+        </button>
         <button
           type="button"
           id="theme-toggle"
@@ -1125,18 +1155,54 @@
       </div>
     </div>
 
+    <div
+      id="ack-panel-backdrop"
+      class="ack-panel-backdrop"
+      hidden
+      aria-hidden="true"
+    ></div>
+    <aside
+      id="ack-panel"
+      class="ack-panel"
+      hidden
+      aria-labelledby="ack-panel-title"
+    >
+      <div class="ack-panel-head">
+        <h2 id="ack-panel-title">Parked for today</h2>
+        <button
+          type="button"
+          id="ack-panel-close"
+          class="btn btn-ghost ack-panel-close"
+          aria-label="Close parked panel"
+        >
+          <span class="material-symbols-outlined" aria-hidden="true">close</span>
+        </button>
+      </div>
+      <p class="ack-panel-note">
+        Acknowledged items stay out of your main list until midnight. Bring them
+        back anytime.
+      </p>
+      <div id="ack-panel-list" class="ack-panel-list" role="list"></div>
+      <div class="ack-panel-foot">
+        <button type="button" id="ack-panel-reset" class="btn btn-ghost" disabled>
+          <span class="material-symbols-outlined" aria-hidden="true">restart_alt</span>
+          <span class="btn-label">Reset parked</span>
+        </button>
+      </div>
+    </aside>
+
     <!-- mock-data.js stays wired so demo.html / top-level opens work without Trello. -->
-    <script src="./config.js?v=20260922a"></script>
+    <script src="./config.js?v=20261026c"></script>
     <script src="https://p.trellocdn.com/power-up.min.js"></script>
-    <script src="./js/demo-mode.js?v=20260922a"></script>
-    <script src="./js/cookies.js?v=20260922a"></script>
-    <script src="./js/prefs.js?v=20260922a"></script>
-    <script src="./js/mock-data.js?v=20260922a"></script>
-    <script src="./js/api.js?v=20260922a"></script>
-    <script src="./js/date-utils.js?v=20260922a"></script>
-    <script src="./js/filter-state.js?v=20260922a"></script>
-    <script src="./js/markdown-inline.js?v=20260922a"></script>
-    <script src="./js/hub-views.js?v=20260922a"></script>
-    <script src="./js/dashboard.js?v=20260922a"></script>
+    <script src="./js/demo-mode.js?v=20261026c"></script>
+    <script src="./js/cookies.js?v=20261026c"></script>
+    <script src="./js/prefs.js?v=20261026c"></script>
+    <script src="./js/mock-data.js?v=20261026c"></script>
+    <script src="./js/api.js?v=20261026c"></script>
+    <script src="./js/date-utils.js?v=20261026c"></script>
+    <script src="./js/filter-state.js?v=20261026c"></script>
+    <script src="./js/markdown-inline.js?v=20261026c"></script>
+    <script src="./js/hub-views.js?v=20261026c"></script>
+    <script src="./js/dashboard.js?v=20261026c"></script>
   </body>
 </html>

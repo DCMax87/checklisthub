@@ -85,7 +85,27 @@
         "aria-label",
         "Open card " + (item.cardName || item.name || "") + " in Trello"
       );
+      link.addEventListener("click", function () {
+        if (typeof host.onOpened === "function") host.onOpened(item);
+        else if (typeof host.onOpen === "function") host.onOpen(item);
+      });
       actions.appendChild(link);
+    }
+    if (typeof host.onAcknowledge === "function") {
+      var ackBtn = el("button", "link-ack");
+      ackBtn.type = "button";
+      ackBtn.textContent = "Acknowledge";
+      ackBtn.setAttribute(
+        "aria-label",
+        "Park for today — bring back tomorrow"
+      );
+      ackBtn.title = "Park for today — bring back tomorrow";
+      ackBtn.addEventListener("click", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        host.onAcknowledge(item);
+      });
+      actions.appendChild(ackBtn);
     }
     if (actions.childNodes.length) parent.appendChild(actions);
   }
@@ -95,6 +115,10 @@
     node.setAttribute("data-row-id", item.id);
     if (host.selectedId && host.selectedId === item.id) {
       node.classList.add("is-selected");
+    }
+    if (host.lastOpenedId && host.lastOpenedId === item.id) {
+      node.classList.add("is-opened");
+      node.setAttribute("data-opened", "true");
     }
     node.addEventListener("click", function (event) {
       if (event.target.closest("a, button, input, select")) return;
@@ -125,29 +149,108 @@
     return head;
   }
 
+  function agendaHorizonMode(host) {
+    var raw = host && host.agendaHorizon;
+    if (raw === "7" || raw === "14" || raw === "today") return raw;
+    return "today";
+  }
+
+  function agendaDayLabel(date, offset) {
+    if (offset === 0) return "Today";
+    if (offset === 1) return "Tomorrow";
+    return date.toLocaleDateString(undefined, {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+    });
+  }
+
+  function agendaDayTone(offset) {
+    if (offset === 0) return "today";
+    if (offset === 1) return "tomorrow";
+    return "later";
+  }
+
+  function buildAgendaSections(host) {
+    var horizon = agendaHorizonMode(host);
+    var now = (host && host.now) || new Date();
+    var sections = [{ id: "overdue", label: "Overdue", tone: "overdue" }];
+    if (horizon === "today") {
+      sections.push({ id: "today", label: "Today", tone: "today" });
+      sections.push({ id: "tomorrow", label: "Tomorrow", tone: "tomorrow" });
+      return sections;
+    }
+    var span = horizon === "14" ? 14 : 7;
+    var i;
+    for (i = 0; i < span; i += 1) {
+      var day = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
+      var key =
+        host && typeof host.dateKey === "function"
+          ? host.dateKey(day)
+          : (function (d) {
+              var mm = String(d.getMonth() + 1);
+              if (mm.length < 2) mm = "0" + mm;
+              var dd = String(d.getDate());
+              if (dd.length < 2) dd = "0" + dd;
+              return d.getFullYear() + "-" + mm + "-" + dd;
+            })(day);
+      sections.push({
+        id: "day-" + key,
+        dayKey: key,
+        label: agendaDayLabel(day, i),
+        tone: agendaDayTone(i),
+      });
+    }
+    return sections;
+  }
+
   function renderAgenda(root, items, host) {
-    var sections = [
-      { id: "overdue", label: "Overdue", tone: "overdue" },
-      { id: "today", label: "Today", tone: "today" },
-      { id: "tomorrow", label: "Tomorrow", tone: "tomorrow" },
-    ];
-    var buckets = { overdue: [], today: [], tomorrow: [] };
+    var horizon = agendaHorizonMode(host);
+    var sections = buildAgendaSections(host);
+    var buckets = {};
+    sections.forEach(function (section) {
+      buckets[section.id] = [];
+    });
+
     items.forEach(function (item) {
       var isReminder = host.isReminder && host.isReminder(item);
       if (isReminder && !(host.remindersOn && host.remindersOn())) {
         return;
       }
-      var id = host.dueBucket(item).id;
-      if (!buckets[id]) return;
-      buckets[id].push(item);
+      var bucket = host.dueBucket(item);
+      if (bucket.id === "overdue") {
+        buckets.overdue.push(item);
+        return;
+      }
+      if (!item.due) return;
+      if (horizon === "today") {
+        if (bucket.id === "today" || bucket.id === "tomorrow") {
+          buckets[bucket.id].push(item);
+        }
+        return;
+      }
+      var dueDate = new Date(item.due);
+      if (!isFinite(dueDate.getTime())) return;
+      var dayKey =
+        host && typeof host.dateKey === "function"
+          ? host.dateKey(dueDate)
+          : null;
+      if (!dayKey) return;
+      var sectionId = "day-" + dayKey;
+      if (buckets[sectionId]) buckets[sectionId].push(item);
     });
-    var dated =
-      buckets.overdue.length + buckets.today.length + buckets.tomorrow.length;
+
+    var dated = 0;
+    sections.forEach(function (section) {
+      dated += buckets[section.id].length;
+    });
     if (!dated) {
       appendEmpty(
         root,
         "Nothing on the agenda",
-        "No overdue, today, or tomorrow items match the current filters."
+        horizon === "today"
+          ? "No overdue, today, or tomorrow items match the current filters."
+          : "No overdue or upcoming items match the current filters for this range."
       );
       return;
     }
@@ -218,6 +321,9 @@
             titleLink.href = agendaSafe;
             titleLink.target = "_blank";
             titleLink.rel = "noopener noreferrer";
+            titleLink.addEventListener("click", function () {
+              if (typeof host.onOpened === "function") host.onOpened(item);
+            });
             title.appendChild(titleLink);
           } else {
             title.textContent = item.name;
@@ -976,11 +1082,24 @@
   function render(view, root, items, host) {
     root.innerHTML = "";
     root.setAttribute("data-view", view || "");
+    var agendaHorizon = agendaHorizonMode(host);
+    var agendaIntro =
+      agendaHorizon === "14"
+        ? [
+            "Next 14 days",
+            "Overdue work plus the next two weeks, in due order.",
+          ]
+        : agendaHorizon === "7"
+          ? [
+              "Next 7 days",
+              "Overdue work plus the coming week, in due order.",
+            ]
+          : [
+              "Today’s agenda",
+              "Overdue, today, and tomorrow work in one focused sequence.",
+            ];
     var intros = {
-      agenda: [
-        "Today’s agenda",
-        "Overdue, today, and tomorrow work in one focused sequence.",
-      ],
+      agenda: agendaIntro,
       horizon: [
         "Upcoming by board",
         "Compare where overdue and upcoming work is concentrated.",

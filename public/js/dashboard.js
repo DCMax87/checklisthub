@@ -186,6 +186,14 @@
     shortcutsOpenBtn: document.getElementById("shortcuts-open-btn"),
     shortcutsModal: document.getElementById("shortcuts-modal"),
     shortcutsModalClose: document.getElementById("shortcuts-modal-close"),
+    agendaHorizon: document.getElementById("agenda-horizon"),
+    ackPanelToggle: document.getElementById("ack-panel-toggle"),
+    ackPanelCount: document.getElementById("ack-panel-count"),
+    ackPanel: document.getElementById("ack-panel"),
+    ackPanelBackdrop: document.getElementById("ack-panel-backdrop"),
+    ackPanelClose: document.getElementById("ack-panel-close"),
+    ackPanelList: document.getElementById("ack-panel-list"),
+    ackPanelReset: document.getElementById("ack-panel-reset"),
   };
 
   var prefs = prefsApi.loadPrefs();
@@ -254,9 +262,18 @@
     assigneeDirectory: {},
     teamsContextNote: "",
     selectedRowId: "",
+    /** Row id last opened via Open / title link (session highlight). */
+    lastOpenedRowId: "",
     visibleItems: [],
     /** Last list order (item id → index) for stable refresh reordering. */
     listOrderIndex: {},
+    agendaHorizon:
+      prefsApi.normalizeAgendaHorizon
+        ? prefsApi.normalizeAgendaHorizon(prefs.agendaHorizon)
+        : prefs.agendaHorizon === "7" || prefs.agendaHorizon === "14"
+          ? prefs.agendaHorizon
+          : "today",
+    ackPanelOpen: Boolean(prefs.ackPanelOpen),
   };
 
   if (els.filterGroup) {
@@ -339,7 +356,196 @@
     if (patch.collapsedGroups != null) {
       state.collapsedGroups = next.collapsedGroups;
     }
+    if (patch.agendaHorizon != null) {
+      state.agendaHorizon = next.agendaHorizon;
+    }
+    if (patch.ackPanelOpen != null) {
+      state.ackPanelOpen = Boolean(next.ackPanelOpen);
+    }
     return next;
+  }
+
+  function viewSupportsAcknowledge(view) {
+    return view === "list" || view === "agenda" || view === "calendar";
+  }
+
+  function ackBaseId(itemOrId) {
+    var raw =
+      itemOrId && typeof itemOrId === "object" ? itemOrId.id : itemOrId;
+    if (prefsApi.baseAckId) return prefsApi.baseAckId(raw);
+    if (api && typeof api.baseItemId === "function") return api.baseItemId(raw);
+    return String(raw || "").replace(/#reminder-.*$/, "");
+  }
+
+  function isAcknowledged(item) {
+    if (!item) return false;
+    if (prefsApi.isAcknowledgedId) return prefsApi.isAcknowledgedId(item.id);
+    return false;
+  }
+
+  function acknowledgeItem(item) {
+    if (!item || !prefsApi.acknowledgeId) return;
+    prefsApi.acknowledgeId(item.id);
+    renderTable();
+    renderAckPanel();
+  }
+
+  function unacknowledgeItem(item) {
+    if (!item || !prefsApi.unacknowledgeId) return;
+    prefsApi.unacknowledgeId(item.id);
+    renderTable();
+    renderAckPanel();
+  }
+
+  function resetAcknowledgedItems() {
+    if (prefsApi.resetAcknowledged) prefsApi.resetAcknowledged();
+    renderTable();
+    renderAckPanel();
+  }
+
+  function syncAgendaHorizonControls() {
+    if (!els.agendaHorizon) return;
+    var current = state.agendaHorizon || "today";
+    els.agendaHorizon.querySelectorAll("[data-horizon]").forEach(function (btn) {
+      var active = btn.getAttribute("data-horizon") === current;
+      btn.classList.toggle("is-active", active);
+      btn.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+  }
+
+  function setAgendaHorizon(horizon) {
+    var next = prefsApi.normalizeAgendaHorizon
+      ? prefsApi.normalizeAgendaHorizon(horizon)
+      : horizon === "7" || horizon === "14"
+        ? horizon
+        : "today";
+    state.agendaHorizon = next;
+    savePrefs({ agendaHorizon: next });
+    syncAgendaHorizonControls();
+    if (state.view === "agenda") renderTable();
+  }
+
+  function setAckPanelOpen(open) {
+    var next = Boolean(open);
+    state.ackPanelOpen = next;
+    savePrefs({ ackPanelOpen: next });
+    document.body.classList.toggle("ack-panel-open", next);
+    if (els.ackPanel) els.ackPanel.hidden = !next;
+    if (els.ackPanelBackdrop) els.ackPanelBackdrop.hidden = !next;
+    if (els.ackPanelToggle) {
+      els.ackPanelToggle.setAttribute("aria-expanded", next ? "true" : "false");
+      els.ackPanelToggle.classList.toggle("is-active", next);
+    }
+    if (next) renderAckPanel();
+  }
+
+  function parkedItemsForPanel() {
+    if (!state.data) return [];
+    var filterState = Object.assign({}, captureFilterState(), {
+      due: "all",
+      bypassDue: true,
+    });
+    var ackIds = prefsApi.loadAcknowledgedIds
+      ? prefsApi.loadAcknowledgedIds()
+      : [];
+    if (!ackIds.length) return [];
+    var ackSet = {};
+    ackIds.forEach(function (id) {
+      ackSet[id] = true;
+    });
+    var seen = {};
+    var out = [];
+    collectRows().forEach(function (item) {
+      var key = ackBaseId(item);
+      if (!key || !ackSet[key] || seen[key]) return;
+      if (!matchesFilters(item, filterState)) return;
+      seen[key] = true;
+      out.push(item);
+    });
+    return out.sort(compareItems);
+  }
+
+  function updateAckBadge(count) {
+    if (!els.ackPanelCount || !els.ackPanelToggle) return;
+    var n = Number(count) || 0;
+    if (n > 0) {
+      els.ackPanelCount.hidden = false;
+      els.ackPanelCount.textContent = String(n);
+      els.ackPanelToggle.title =
+        "Parked for today (" + n + " item" + (n === 1 ? "" : "s") + ")";
+    } else {
+      els.ackPanelCount.hidden = true;
+      els.ackPanelCount.textContent = "0";
+      els.ackPanelToggle.title = "Parked for today";
+    }
+  }
+
+  function renderAckPanel() {
+    var parked = parkedItemsForPanel();
+    updateAckBadge(parked.length);
+    if (els.ackPanelReset) {
+      els.ackPanelReset.disabled = !parked.length;
+    }
+    if (!els.ackPanelList) return;
+    els.ackPanelList.innerHTML = "";
+    if (!parked.length) {
+      var empty = document.createElement("p");
+      empty.className = "ack-panel-empty";
+      empty.textContent =
+        "Nothing parked. Acknowledge items from List, Agenda, or Calendar to park them here for today.";
+      els.ackPanelList.appendChild(empty);
+      return;
+    }
+    parked.forEach(function (item) {
+      var row = document.createElement("article");
+      row.className = "ack-panel-item";
+      row.setAttribute("role", "listitem");
+
+      var title = document.createElement("div");
+      title.className = "ack-panel-item-title";
+      title.textContent = plainItemTitle(item.name || item.cardName || "Untitled");
+      row.appendChild(title);
+
+      var meta = document.createElement("div");
+      meta.className = "ack-panel-item-meta";
+      var bits = [];
+      if (item.due) bits.push(formatDue(item.due));
+      if (item.cardName) bits.push(item.cardName);
+      if (item.boardName) bits.push(item.boardName);
+      meta.textContent = bits.join(" · ");
+      row.appendChild(meta);
+
+      var actions = document.createElement("div");
+      actions.className = "ack-panel-item-actions";
+      if (item.cardUrl) {
+        var openLink = document.createElement("a");
+        openLink.className = "link-open";
+        openLink.target = "_blank";
+        openLink.rel = "noopener noreferrer";
+        openLink.textContent = "Open";
+        if (applySafeHref(openLink, item.cardUrl)) {
+          openLink.addEventListener("click", function () {
+            markItemOpened(item);
+            scheduleBoardRefreshAfterOpen(item.boardId, item.boardName);
+          });
+          actions.appendChild(openLink);
+        }
+      }
+      var bringBack = document.createElement("button");
+      bringBack.type = "button";
+      bringBack.className = "btn btn-ghost ack-bring-back";
+      bringBack.textContent = "Bring back";
+      bringBack.setAttribute(
+        "aria-label",
+        "Bring back " + (item.name || "item") + " to the main list"
+      );
+      bringBack.addEventListener("click", function () {
+        unacknowledgeItem(item);
+      });
+      actions.appendChild(bringBack);
+      row.appendChild(actions);
+      els.ackPanelList.appendChild(row);
+    });
   }
 
   function resetGroupVisibleCounts() {
@@ -529,10 +735,30 @@
     return null;
   }
 
+  function markItemOpened(item) {
+    if (!item || !item.id) return;
+    state.lastOpenedRowId = String(item.id);
+    highlightOpenedRow();
+  }
+
+  function highlightOpenedRow() {
+    var openedId = state.lastOpenedRowId || "";
+    document.querySelectorAll(".hub-row").forEach(function (row) {
+      var match = openedId && row.getAttribute("data-row-id") === openedId;
+      row.classList.toggle("is-opened", Boolean(match));
+      if (match) {
+        row.setAttribute("data-opened", "true");
+      } else {
+        row.removeAttribute("data-opened");
+      }
+    });
+  }
+
   function openSafeCardUrl(url, item) {
     var safe = safeCardUrl(url);
     if (!safe) return;
     window.open(safe, "_blank", "noopener,noreferrer");
+    if (item) markItemOpened(item);
     if (item && item.boardId) {
       scheduleBoardRefreshAfterOpen(item.boardId, item.boardName);
     }
@@ -2024,6 +2250,7 @@
       appendItemTitle(nameLink, title, { allowLinks: false });
       if (applySafeHref(nameLink, cardUrl)) {
         nameLink.addEventListener("click", function () {
+          markItemOpened(item);
           scheduleBoardRefreshAfterOpen(item.boardId, item.boardName);
         });
         parent.appendChild(nameLink);
@@ -2081,6 +2308,10 @@
     tr.classList.add("hub-row");
     tr.setAttribute("data-row-id", item.id);
     if (state.selectedRowId === item.id) tr.classList.add("is-selected");
+    if (state.lastOpenedRowId === item.id) {
+      tr.classList.add("is-opened");
+      tr.setAttribute("data-opened", "true");
+    }
     if (rowState === "complete") tr.classList.add("is-complete");
     if (isReminderRow(item)) tr.classList.add("is-reminder");
     if (isCardWork(item)) tr.classList.add("is-card");
@@ -2273,10 +2504,29 @@
       );
       if (applySafeHref(a, item.cardUrl)) {
         a.addEventListener("click", function () {
+          markItemOpened(item);
           scheduleBoardRefreshAfterOpen(item.boardId, item.boardName);
         });
         linkActions.appendChild(a);
       }
+    }
+
+    if (viewSupportsAcknowledge(state.view) && !isAcknowledged(item)) {
+      var ackBtn = document.createElement("button");
+      ackBtn.type = "button";
+      ackBtn.className = "link-ack";
+      ackBtn.textContent = "Ack";
+      ackBtn.title = "Park for today — bring back tomorrow";
+      ackBtn.setAttribute(
+        "aria-label",
+        "Park for today — bring back tomorrow"
+      );
+      ackBtn.addEventListener("click", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        acknowledgeItem(item);
+      });
+      linkActions.appendChild(ackBtn);
     }
 
     if (linkActions.childNodes.length) {
@@ -2657,6 +2907,7 @@
             }
             preview.addEventListener("click", function (event) {
               event.stopPropagation();
+              markItemOpened(item);
               scheduleBoardRefreshAfterOpen(item.boardId, item.boardName);
             });
           }
@@ -2798,6 +3049,7 @@
     var ownsTime = viewOwnsTime(state.view);
     var insight = isInsightView(state.view);
     syncViewMenu();
+    syncAgendaHorizonControls();
     if (els.groupField) {
       els.groupField.hidden = state.view !== "list";
     }
@@ -2806,6 +3058,9 @@
     }
     if (els.focusChips) {
       els.focusChips.hidden = ownsTime;
+    }
+    if (els.agendaHorizon) {
+      els.agendaHorizon.hidden = state.view !== "agenda";
     }
     if (els.insightWrap && !insight) {
       els.insightWrap.hidden = true;
@@ -2836,6 +3091,7 @@
     if (!state.data) {
       // Still sync timeframe chip active state before the first load.
       updateFocusChips();
+      renderAckPanel();
       return;
     }
 
@@ -2859,8 +3115,14 @@
         return matchesFilters(item, filterState);
       })
       .sort(compareItems);
+    if (viewSupportsAcknowledge(state.view)) {
+      filtered = filtered.filter(function (item) {
+        return !isAcknowledged(item);
+      });
+    }
     state.visibleItems = filtered;
     rememberListOrder(filtered);
+    renderAckPanel();
 
     var counted = filtered.filter(function (item) {
       if (!viewUsesReminders(state.view) && isReminderRow(item)) return false;
@@ -3084,6 +3346,7 @@
       window.ChecklistHubViews.render(state.view, els.insightWrap, filtered, {
       now: new Date(),
       selectedId: state.selectedRowId,
+      lastOpenedId: state.lastOpenedRowId,
       formatDue: formatDue,
       formatRelative: formatDueRelative,
       dueBucket: dueBucket,
@@ -3091,6 +3354,7 @@
       isReminder: isReminderRow,
       workKind: workKind,
       dateKey: dateKey,
+      agendaHorizon: state.agendaHorizon,
       remindersOn: remindersEnabled,
       appendItemTitle: appendItemTitle,
       plainItemTitle: plainItemTitle,
@@ -3105,6 +3369,14 @@
           openSafeCardUrl(item.cardUrl, item);
         }
       },
+      onOpened: function (item) {
+        markItemOpened(item);
+      },
+      onAcknowledge: viewSupportsAcknowledge(state.view)
+        ? function (item) {
+            acknowledgeItem(item);
+          }
+        : null,
       onChecklistDetail: function (checklist) {
         openGanttChecklistModal(checklist);
       },
@@ -3610,11 +3882,16 @@
     if (els.workspace) els.workspace.hidden = !isAuthorized;
     if (els.configToggle) els.configToggle.hidden = !isAuthorized;
     if (els.themeToggle) els.themeToggle.hidden = !isAuthorized;
+    if (els.ackPanelToggle) els.ackPanelToggle.hidden = !isAuthorized;
     if (els.metaRow) els.metaRow.hidden = !isAuthorized;
     if (els.viewToggle) els.viewToggle.hidden = !isAuthorized;
     if (els.stageBar) els.stageBar.hidden = !isAuthorized;
     if (!isAuthorized) {
       setConfigOpen(false);
+      document.body.classList.remove("ack-panel-open");
+      if (els.ackPanel) els.ackPanel.hidden = true;
+      if (els.ackPanelBackdrop) els.ackPanelBackdrop.hidden = true;
+      if (els.agendaHorizon) els.agendaHorizon.hidden = true;
       if (els.calendarWrap) els.calendarWrap.hidden = true;
       if (els.insightWrap) els.insightWrap.hidden = true;
       if (els.insightWrap) els.insightWrap.hidden = true;
@@ -3627,6 +3904,8 @@
       else stopStatusNudgeWatch();
       updateAllowlistSummary();
       syncActionButtons();
+      if (state.ackPanelOpen) setAckPanelOpen(true);
+      else renderAckPanel();
     }
   }
 
@@ -6740,6 +7019,47 @@
     });
   }
 
+  if (els.agendaHorizon) {
+    els.agendaHorizon.addEventListener("click", function (event) {
+      var btn = event.target.closest("[data-horizon]");
+      if (!btn) return;
+      setAgendaHorizon(btn.getAttribute("data-horizon"));
+    });
+  }
+
+  if (els.ackPanelToggle) {
+    els.ackPanelToggle.addEventListener("click", function () {
+      setAckPanelOpen(!state.ackPanelOpen);
+    });
+  }
+  if (els.ackPanelClose) {
+    els.ackPanelClose.addEventListener("click", function () {
+      setAckPanelOpen(false);
+      if (els.ackPanelToggle) els.ackPanelToggle.focus();
+    });
+  }
+  if (els.ackPanelBackdrop) {
+    els.ackPanelBackdrop.addEventListener("click", function () {
+      setAckPanelOpen(false);
+    });
+  }
+  if (els.ackPanelReset) {
+    els.ackPanelReset.addEventListener("click", function () {
+      resetAcknowledgedItems();
+    });
+  }
+
+  syncAgendaHorizonControls();
+  if (state.ackPanelOpen) {
+    document.body.classList.add("ack-panel-open");
+    if (els.ackPanel) els.ackPanel.hidden = false;
+    if (els.ackPanelBackdrop) els.ackPanelBackdrop.hidden = false;
+    if (els.ackPanelToggle) {
+      els.ackPanelToggle.setAttribute("aria-expanded", "true");
+      els.ackPanelToggle.classList.add("is-active");
+    }
+  }
+
   if (els.themeToggle) {
     els.themeToggle.addEventListener("click", function () {
       applyTheme(state.theme === "dark" ? "light" : "dark");
@@ -7217,6 +7537,12 @@
       }
       if (els.welcomeModal && !els.welcomeModal.hidden) {
         closeWelcomeModal({ persist: true });
+        event.preventDefault();
+        return;
+      }
+      if (els.ackPanel && !els.ackPanel.hidden) {
+        setAckPanelOpen(false);
+        if (els.ackPanelToggle) els.ackPanelToggle.focus();
         event.preventDefault();
         return;
       }

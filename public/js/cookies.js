@@ -39,6 +39,31 @@
       cookieSecuritySuffix();
   }
 
+  /** Absolute expiry (e.g. local midnight). Uses both expires= and max-age. */
+  function setCookieExpiresAt(name, value, expiresAt) {
+    const expires = new Date(expiresAt);
+    if (!isFinite(expires.getTime())) {
+      throw new Error("Invalid cookie expiry.");
+    }
+    const maxAge = Math.max(
+      0,
+      Math.floor((expires.getTime() - Date.now()) / 1000)
+    );
+    const encoded = encodeURIComponent(value == null ? "" : String(value));
+    if (encoded.length > 3500) {
+      throw new Error("Preference too large to store in a cookie.");
+    }
+    document.cookie =
+      name +
+      "=" +
+      encoded +
+      "; path=/; expires=" +
+      expires.toUTCString() +
+      "; max-age=" +
+      maxAge +
+      cookieSecuritySuffix();
+  }
+
   function removeCookie(name) {
     document.cookie =
       name + "=; path=/; max-age=0" + cookieSecuritySuffix();
@@ -57,6 +82,16 @@
   function writeJsonCookie(name, value, days) {
     try {
       setCookie(name, JSON.stringify(value), days);
+    } catch (e) {
+      if (typeof console !== "undefined" && console.warn) {
+        console.warn("Checklist Hub could not save preferences:", e.message || e);
+      }
+    }
+  }
+
+  function writeJsonCookieExpiresAt(name, value, expiresAt) {
+    try {
+      setCookieExpiresAt(name, JSON.stringify(value), expiresAt);
     } catch (e) {
       if (typeof console !== "undefined" && console.warn) {
         console.warn("Checklist Hub could not save preferences:", e.message || e);
@@ -84,9 +119,11 @@
   global.ChecklistHubCookies = {
     get: getCookie,
     set: setCookie,
+    setExpiresAt: setCookieExpiresAt,
     remove: removeCookie,
     readJson: readJsonCookie,
     writeJson: writeJsonCookie,
+    writeJsonExpiresAt: writeJsonCookieExpiresAt,
     purgeLegacyBrowserStorage: purgeLegacyBrowserStorage,
   };
 })(window);

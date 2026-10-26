@@ -2,6 +2,8 @@
   const cookies = global.ChecklistHubCookies;
   const PREFS_COOKIE = "ch_hub_prefs";
   const VIEWS_COOKIE = "ch_hub_views";
+  const ACK_COOKIE = "ch_hub_ack_day";
+  const ACK_MAX_IDS = 80;
 
   function normalizeGroupPageSize(value) {
     var n = Number(value);
@@ -9,6 +11,37 @@
     if (n === 0) return 0;
     if (n === 10 || n === 20 || n === 50 || n === 100) return n;
     return 20;
+  }
+
+  function normalizeAgendaHorizon(value) {
+    if (value === "7" || value === "14" || value === "today") return value;
+    return "today";
+  }
+
+  function localDayKey(date) {
+    var d = date || new Date();
+    var y = d.getFullYear();
+    var m = String(d.getMonth() + 1);
+    if (m.length < 2) m = "0" + m;
+    var day = String(d.getDate());
+    if (day.length < 2) day = "0" + day;
+    return y + "-" + m + "-" + day;
+  }
+
+  function nextLocalMidnight() {
+    var d = new Date();
+    d.setHours(24, 0, 0, 0);
+    return d;
+  }
+
+  function baseAckId(id) {
+    if (
+      global.ChecklistHubApi &&
+      typeof global.ChecklistHubApi.baseItemId === "function"
+    ) {
+      return global.ChecklistHubApi.baseItemId(id);
+    }
+    return String(id || "").replace(/#reminder-.*$/, "");
   }
 
   function pruneCollapsedGroups(map) {
@@ -46,6 +79,8 @@
       calendarMode: "month",
       /** One-time: Member Only Cards default flipped to off. */
       memberCardsDefaultOff: true,
+      agendaHorizon: "today",
+      ackPanelOpen: false,
     };
   }
 
@@ -58,6 +93,8 @@
       prefs.calendarMode = "week";
     }
     if (prefs.calendarMode !== "week") prefs.calendarMode = "month";
+    prefs.agendaHorizon = normalizeAgendaHorizon(prefs.agendaHorizon);
+    prefs.ackPanelOpen = Boolean(prefs.ackPanelOpen);
     // Apply new default once for existing cookies that still had member cards on.
     if (stored && !stored.memberCardsDefaultOff) {
       prefs.hideCards = true;
@@ -90,9 +127,77 @@
       showUnassigned: Boolean(next.showUnassigned),
       calendarMode: next.calendarMode === "week" ? "week" : "month",
       memberCardsDefaultOff: true,
+      agendaHorizon: normalizeAgendaHorizon(next.agendaHorizon),
+      ackPanelOpen: Boolean(next.ackPanelOpen),
     };
     cookies.writeJson(PREFS_COOKIE, safe, 180);
     return safe;
+  }
+
+  function loadAcknowledgedIds() {
+    const raw = cookies.readJson(ACK_COOKIE, null);
+    const today = localDayKey();
+    if (!raw || typeof raw !== "object" || raw.day !== today) {
+      return [];
+    }
+    if (!Array.isArray(raw.ids)) return [];
+    return raw.ids
+      .map(function (id) {
+        return String(id || "").slice(0, 48);
+      })
+      .filter(Boolean)
+      .slice(0, ACK_MAX_IDS);
+  }
+
+  function saveAcknowledgedIds(ids) {
+    const seen = {};
+    const next = [];
+    (ids || []).forEach(function (id) {
+      const key = baseAckId(id).slice(0, 48);
+      if (!key || seen[key]) return;
+      seen[key] = true;
+      next.push(key);
+    });
+    const trimmed = next.slice(0, ACK_MAX_IDS);
+    if (!trimmed.length) {
+      cookies.remove(ACK_COOKIE);
+      return [];
+    }
+    cookies.writeJsonExpiresAt(
+      ACK_COOKIE,
+      { day: localDayKey(), ids: trimmed },
+      nextLocalMidnight()
+    );
+    return trimmed;
+  }
+
+  function acknowledgeId(id) {
+    const key = baseAckId(id);
+    if (!key) return loadAcknowledgedIds();
+    const ids = loadAcknowledgedIds();
+    if (ids.indexOf(key) >= 0) return ids;
+    ids.push(key);
+    return saveAcknowledgedIds(ids);
+  }
+
+  function unacknowledgeId(id) {
+    const key = baseAckId(id);
+    return saveAcknowledgedIds(
+      loadAcknowledgedIds().filter(function (entry) {
+        return entry !== key;
+      })
+    );
+  }
+
+  function resetAcknowledged() {
+    cookies.remove(ACK_COOKIE);
+    return [];
+  }
+
+  function isAcknowledgedId(id) {
+    const key = baseAckId(id);
+    if (!key) return false;
+    return loadAcknowledgedIds().indexOf(key) >= 0;
   }
 
   function loadViews() {
@@ -150,6 +255,14 @@
     saveViews: saveViews,
     upsertView: upsertView,
     deleteView: deleteView,
+    normalizeAgendaHorizon: normalizeAgendaHorizon,
+    loadAcknowledgedIds: loadAcknowledgedIds,
+    saveAcknowledgedIds: saveAcknowledgedIds,
+    acknowledgeId: acknowledgeId,
+    unacknowledgeId: unacknowledgeId,
+    resetAcknowledged: resetAcknowledged,
+    isAcknowledgedId: isAcknowledgedId,
+    baseAckId: baseAckId,
   };
 })(window);
 
