@@ -134,6 +134,19 @@
     return safe;
   }
 
+  function hubIsEmbedded() {
+    try {
+      return global.top !== global.self;
+    } catch (e) {
+      return true;
+    }
+  }
+
+  function clearAckCookie() {
+    cookies.remove(ACK_COOKIE);
+    if (hubIsEmbedded()) cookies.remove(ACK_COOKIE, true);
+  }
+
   function loadAcknowledgedIds() {
     const raw = cookies.readJson(ACK_COOKIE, null);
     const today = localDayKey();
@@ -160,14 +173,15 @@
     });
     const trimmed = next.slice(0, ACK_MAX_IDS);
     if (!trimmed.length) {
-      cookies.remove(ACK_COOKIE);
+      clearAckCookie();
       return [];
     }
     const payload = { day: localDayKey(), ids: trimmed };
     const midnight = nextLocalMidnight();
     // Prefer absolute expiry; fall back to fractional-day max-age (same path as prefs).
+    // Partition the cookie inside the Trello iframe so it is not dropped on close.
     if (typeof cookies.writeJsonExpiresAt === "function") {
-      cookies.writeJsonExpiresAt(ACK_COOKIE, payload, midnight);
+      cookies.writeJsonExpiresAt(ACK_COOKIE, payload, midnight, hubIsEmbedded());
     }
     var written = cookies.readJson(ACK_COOKIE, null);
     if (
@@ -204,7 +218,7 @@
   }
 
   function resetAcknowledged() {
-    cookies.remove(ACK_COOKIE);
+    clearAckCookie();
     return [];
   }
 
